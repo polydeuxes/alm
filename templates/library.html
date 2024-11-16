@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audible Library</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0066FF;
+            --primary-hover: #0052CC;
+            --danger: #DC2626;
+            --success: #059669;
+            --warning: #D97706;
+            --bg-header: #F3F4F6;
+            --bg-card: #FFFFFF;
+            --text-primary: #111827;
+            --text-secondary: #4B5563;
+            --border: #E5E7EB;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #F9FAFB;
+            color: var(--text-primary);
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        .main-header {
+            background: var(--bg-card);
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .profile-card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .profile-header {
+            background: var(--bg-header);
+            padding: 1.25rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .profile-header:hover {
+            background: #E5E7EB;
+        }
+
+        .profile-info {
+            flex: 1;
+        }
+
+        .profile-actions {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .book-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .book-table th,
+        .book-table td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+        }
+
+        .book-table th {
+            background: var(--bg-header);
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .status-badge.completed {
+            background: #DEF7EC;
+            color: var(--success);
+        }
+
+        .status-badge.pending {
+            background: #FEF3C7;
+            color: var(--warning);
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .file-size {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .progress-bar {
+            height: 4px;
+            background: #E5E7EB;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            transition: width 0.3s ease;
+        }
+
+        .profile-content {
+            display: none;
+            padding: 1.5rem;
+            background: white;
+        }
+
+        .profile-content.active {
+            display: block;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading {
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #E5E7EB;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+        }
+
+        .cover-image {
+            width: 60px;
+            height: 60px;
+            object-fit: container;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            background: #f3f4f6;
+            padding: 2px;
+        }
+
+        .stats-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .na-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            background: #F3F4F6;
+            color: #6B7280;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal img {
+            max-width: 90%;
+            max-height: 90vh;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        .cover-image {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .cover-image:hover {
+            transform: scale(1.05);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .lock-icon {
+            color: #EAB308;
+            margin-left: 0.5rem;
+        }
+
+        .cover-container {
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-header">
+            <h1 class="text-2xl font-bold">Audible Library Manager</h1>
+            <button class="btn btn-primary" onclick="rescanLibrary()">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Rescan Library
+            </button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="text-sm text-gray-600">Audible Files</div>
+                <div class="mt-1 text-2xl font-semibold">
+                    {{ total_audible_files }}
+                    <span class="text-sm font-normal text-gray-600">({{ total_audible_size|filesize }})</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="text-sm text-gray-600">Total M4B Files</div>
+                <div class="mt-1 text-2xl font-semibold">
+                    {{ total_m4b_files }}
+                    <span class="text-sm font-normal text-gray-600">({{ total_m4b_size|filesize }})</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="text-sm text-gray-600">Companion PDFs</div>
+                <div class="mt-1 text-2xl font-semibold">
+                    {{ total_pdf_files }}
+                    <span class="text-sm font-normal text-gray-600">({{ total_pdf_size|filesize }})</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="text-sm text-gray-600">Total Books</div>
+                <div class="mt-1 text-2xl font-semibold">{{ total_books }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="text-sm text-gray-600">Locked Books</div>
+                <div class="mt-1 text-2xl font-semibold">{{ total_locked }}</div>
+            </div>
+        </div>
+
+        {% for profile in profiles %}
+        <div class="profile-card">
+            <div class="profile-header" onclick="toggleProfile('{{ profile.name }}')">
+                <div class="profile-info">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-lg font-semibold">{{ profile.name }} ({{ profile.country }})</h2>
+                        {% if profile.expires %}
+                        <span class="text-sm text-gray-600">Expires: {{ profile.expires|fromtimestamp }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="text-sm text-gray-600 mt-1">
+                        {{ libraries[profile.name]|length }} books |
+                        Audible: {{ libraries[profile.name]|selectattr('audible_file')|list|length }}/{{ profile_stats[profile.name].audible_total }}
+                        ({{ profile_stats[profile.name].audible_size|filesize }}) |
+                        M4B: {{ libraries[profile.name]|selectattr('m4b_file')|list|length }}/{{ profile_stats[profile.name].m4b_total }}
+                        ({{ profile_stats[profile.name].m4b_size|filesize }})
+                    </div>
+                </div>
+                <div class="profile-actions">
+                    <button class="btn btn-primary" onclick="event.stopPropagation(); updateLibrary('{{ profile.name }}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Update Library
+                    </button>
+                    <button class="btn btn-primary" onclick="event.stopPropagation(); downloadAll('{{ profile.name }}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Pull All
+                    </button>
+                    <button class="btn btn-primary" onclick="event.stopPropagation(); downloadBooks('{{ profile.name }}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Pull Books
+                    </button>
+                    <button class="btn btn-primary" onclick="event.stopPropagation(); convertAll('{{ profile.name }}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Convert All
+                    </button>
+                    <button class="btn btn-primary" onclick="event.stopPropagation(); downloadAllImages('{{ profile.name }}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Pull Images
+                    </button>
+                    <button class="btn btn-primary" onclick="event.stopPropagation(); downloadAllPDFs('{{ profile.name }}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                        Pull PDFs
+                    </button>
+                </div>
+            </div>
+            <div id="profile-{{ profile.name }}" class="profile-content">
+                {% if libraries[profile.name] %}
+                <table class="book-table">
+                    <thead>
+                        <tr>
+                            <th class="w-24">Cover</th>
+                            <th>Title</th>
+                            <th>Author</th>
+                            <th class="w-48">Audible</th>
+                            <th class="w-48">M4B</th>
+                            <th class="w-32">Companion PDF</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for book in libraries[profile.name] %}
+                        <tr id="book-{{ book.asin }}">
+                            <td>
+                                {% if book.cover_path %}
+                                <img src="/cover/{{ book.asin }}"
+                                     class="cover-image"
+                                     alt="{{ book.amazon_title }} cover"
+                                     onclick="showCover('/cover/{{ book.asin }}')"
+                                >
+                                {% else %}
+                                <button class="btn btn-primary" onclick="downloadCover('{{ profile.name }}', '{{ book.asin }}')">
+                                    Pull
+                                </button>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="font-medium flex items-center">
+                                    {{ book.amazon_title }}
+                                    {% if book.locked %}
+                                    <button onclick="unlockBook('{{ book.asin }}', event)" 
+                                            class="inline-flex items-center text-yellow-500 hover:text-yellow-600"
+                                            title="Click to unlock">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                        </svg>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                                {% if book.series %}
+                                <div class="text-sm text-gray-600">{{ book.series }} {% if book.series_sequence %}#{{ book.series_sequence }}{% endif %}</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ book.author }}</td>
+                            <td>
+                                <div class="file-info">
+                                    {% if book.audible_file %}
+                                    <button class="btn btn-danger" onclick="confirmDelete('{{ book.asin }}', 'audible')">
+                                        Delete
+                                    </button>
+                                    <span class="file-size">{{ book.audible_size|filesize }}</span>
+                                    {% else %}
+                                        {% if book.locked %}
+                                        <button class="btn btn-warning" onclick="window.open('https://www.audible.com/pd/{{ book.asin }}', '_blank')">
+                                            <svg class="w-4 h-4 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                            </svg>
+                                            Purchase
+                                        </button>
+                                        {% else %}
+                                        <button class="btn btn-primary" onclick="pullBook('{{ profile.name }}', '{{ book.asin }}')">
+                                            Download
+                                        </button>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="file-info">
+                                    {% if book.m4b_file %}
+                                    <div class="btn-group">
+                                        <button class="btn btn-primary" onclick="downloadFile('{{ book.m4b_file }}')">
+                                            Download
+                                        </button>
+                                        <button class="btn btn-danger" onclick="confirmDelete('{{ book.asin }}', 'm4b')">
+                                            Delete
+                                        </button>
+                                    </div>
+                                    <span class="file-size">{{ book.m4b_size|filesize }}</span>
+                                    {% elif book.audible_file %}
+                                    <button class="btn btn-success" onclick="convertBook('{{ book.asin }}')">
+                                        Convert
+                                    </button>
+                                    {% else %}
+                                    <span class="text-gray-400">—</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="file-info">
+                                    {% if book.pdf_file %}
+                                    <button class="btn btn-primary" onclick="window.location.href='/pdf/{{ book.asin }}'">
+                                        Download
+                                    </button>
+                                    <span class="file-size">{{ book.pdf_size|filesize }}</span>
+                                    {% elif book.pdf_available == false %}
+                                    <span class="na-badge">N/A</span>
+                                    {% else %}
+                                    <button class="btn btn-primary" onclick="downloadPDF('{{ profile.name }}', '{{ book.asin }}')">
+                                        Pull PDF
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state">
+                    No books found for this profile
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+
+        {% if unassigned_books %}
+        <div class="profile-card">
+            <div class="profile-header" onclick="toggleProfile('unassigned')">
+                <div class="profile-info">
+                    <h2 class="text-lg font-semibold">Unassigned Books</h2>
+                    <div class="text-sm text-gray-600 mt-1">
+                        {{ unassigned_books|length }} books |
+                        Audible: {{ unassigned_books|selectattr('audible_file')|list|length }} files
+                        ({{ unassigned_stats.audible_size|filesize }}) |
+                        M4B: {{ unassigned_books|selectattr('m4b_file')|list|length }} files
+                        ({{ unassigned_stats.m4b_size|filesize }})
+                    </div>
+                </div>
+            </div>
+            <div id="profile-unassigned" class="profile-content">
+                <table class="book-table">
+                    <thead>
+                        <tr>
+                            <th class="w-16"></th>
+                            <th>Title</th>
+                            <th>Author</th>
+                            <th>Audible</th>
+                            <th>M4B</th>
+                            <th>PDF</th>
+                            <th>Assign To</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for book in unassigned_books %}
+                        <tr id="book-{{ book.asin }}">
+                            <td>
+                                {% if book.cover_path %}
+                                <img src="/cover/{{ book.asin }}"
+                                     class="cover-image"
+                                     alt="{{ book.amazon_title }} cover"
+                                     onclick="showCover('/cover/{{ book.asin }}')"
+                                >
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="font-medium flex items-center gap-2">
+                                    {{ book.amazon_title }}
+                                    {% if book.locked %}
+                                    <svg class="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>{{ book.author }}</td>
+                            <td>
+                                <div class="file-info">
+                                    {% if book.audible_file %}
+                                    <button class="btn btn-danger" onclick="confirmDelete('{{ book.asin }}', 'audible')">
+                                        Delete
+                                    </button>
+                                    <span class="file-size">{{ book.audible_size|filesize }}</span>
+                                    {% else %}
+                                        {% if book.locked %}
+                                        <button class="btn btn-warning" onclick="window.open('https://www.audible.com/pd/{{ book.asin }}', '_blank')">
+                                            <svg class="w-4 h-4 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                           </svg>
+                                            Unlock
+                                        </button>
+                                        {% else %}
+                                        <span class="text-gray-400">—</span>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="file-info">
+                                    {% if book.m4b_file %}
+                                    <button class="btn btn-danger" onclick="confirmDelete('{{ book.asin }}', 'm4b')">
+                                        Delete
+                                    </button>
+                                    <span class="file-size">{{ book.m4b_size|filesize }}</span>
+                                    {% else %}
+                                    <span class="text-gray-400">—</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="file-info">
+                                    {% if book.pdf_file %}
+                                    <button class="btn btn-primary" onclick="window.location.href='/pdf/{{ book.asin }}'">
+                                        Download PDF
+                                    </button>
+                                    <span class="file-size">{{ book.pdf_size|filesize }}</span>
+                                    {% elif book.pdf_available is defined and not book.pdf_available %}
+                                    <span class="na-badge">N/A</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <select
+                                    class="form-select rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                                    onchange="assignBook('{{ book.asin }}', this.value)"
+                                >
+                                    <option value="">Select Profile</option>
+                                    {% for profile in profiles %}
+                                    <option value="{{ profile.name }}">{{ profile.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Modal for cover preview -->
+        <div id="imageModal" class="modal" onclick="this.style.display='none'">
+            <img id="modalImage" src="" alt="Book cover">
+        </div>
+    </div>
+
+    <script>
+        // Show loading state
+        function showLoading(button) {
+            if (!button) return;
+            const originalContent = button.innerHTML;
+            button.setAttribute('data-original-content', originalContent);
+            button.disabled = true;
+            button.innerHTML = '<span class="loading"></span> Processing...';
+        }
+
+        // Restore button state
+        function restoreButton(button) {
+            if (!button) return;
+            const originalContent = button.getAttribute('data-original-content');
+            button.innerHTML = originalContent;
+            button.disabled = false;
+        }
+
+        function updateLibrary(profileName) {
+            const button = event.target.closest('button');
+            if (!confirm(`Update library data for ${profileName} from Audible?`)) return;
+
+            showLoading(button);
+
+            fetch('/update-library', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile: profileName })
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert('Failed to update library: ' + result.error);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function rescanLibrary() {
+            const button = event.target.closest('button');
+            showLoading(button);
+
+            fetch('/rescan', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                restoreButton(button);
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    alert('Rescan failed. Please check logs for details.');
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error during rescan:', error);
+                alert('An error occurred during the rescan.');
+            });
+        }
+
+        function toggleProfile(profileName) {
+            const content = document.getElementById(`profile-${profileName}`);
+            if (content) {
+                // Close any other open sections
+                document.querySelectorAll('.profile-content.active').forEach(el => {
+                    if (el !== content) el.classList.remove('active');
+                });
+                content.classList.toggle('active');
+            }
+        }
+
+        function pullBook(profile, asin) {
+            const row = document.getElementById(`book-${asin}`);
+            const button = row.querySelector('[onclick*="pullBook"]');
+            showLoading(button);
+
+            fetch(`/download/${profile}/${asin}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Download failed: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function convertBook(asin) {
+            const row = document.getElementById(`book-${asin}`);
+            const button = row.querySelector('[onclick*="convertBook"]');
+            showLoading(button);
+
+            fetch(`/convert/${asin}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Conversion failed: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function confirmDelete(asin, fileType) {
+            if (!confirm(`Are you sure you want to delete this ${fileType.toUpperCase()} file?`)) return;
+
+            const row = document.getElementById(`book-${asin}`);
+            const button = row.querySelector(`[onclick*="confirmDelete"][onclick*="${fileType}"]`);
+            showLoading(button);
+
+            fetch('/delete-file', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    asin: asin,
+                    file_type: fileType
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to delete file: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An error occurred while deleting the file.');
+            });
+        }
+
+        function downloadAll(profile) {
+            const button = event.target.closest('button');
+            if (!confirm('Download all missing content (books, covers, PDFs) for this profile?')) return;
+
+            showLoading(button);
+
+            fetch(`/download-complete/${profile}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to start downloads: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function assignBook(asin, profileName) {
+            if (!profileName) return;
+
+            fetch('/assign-book', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    asin: asin,
+                    profile: profileName
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to assign book: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while assigning the book.');
+            });
+        }
+
+        function downloadFile(filePath) {
+            window.location.href = `/download-file?path=${encodeURIComponent(filePath)}`;
+        }
+
+        function showCover(imgSrc) {
+            const modal = document.getElementById('imageModal');
+            const modalImg = document.getElementById('modalImage');
+            modal.style.display = 'flex';
+            modalImg.src = imgSrc;
+        }
+
+        function downloadCover(profile, asin) {
+            const row = document.getElementById(`book-${asin}`);
+            const button = row.querySelector('[onclick*="downloadCover"]');
+            showLoading(button);
+
+            fetch(`/download-cover/${profile}/${asin}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to download cover: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function downloadPDF(profile, asin) {
+            const row = document.getElementById(`book-${asin}`);
+            const button = row.querySelector('[onclick*="downloadPDF"]');
+            showLoading(button);
+
+            fetch(`/download-pdf/${profile}/${asin}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to download PDF: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function downloadAllImages(profile) {
+            const button = event.target.closest('button');
+            if (!confirm('Download all missing cover images for this profile?')) return;
+
+            showLoading(button);
+
+            fetch(`/download-all-covers/${profile}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to download covers: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function convertAll(profile) {
+            const button = event.target.closest('button');
+            if (!confirm('Convert all eligible books to M4B format?')) return;
+
+            showLoading(button);
+
+            fetch(`/convert-all/${profile}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    const message = `Conversion complete:\n` +
+                                  `${result.converted} books converted\n` +
+                                  `${result.failed} failed`;
+                    alert(message);
+                    window.location.reload();
+                } else {
+                    alert(`Failed to start conversions: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function downloadAllPDFs(profile) {
+            const button = event.target.closest('button');
+            if (!confirm('Download all available PDFs for this profile?')) return;
+
+            showLoading(button);
+
+            fetch(`/download-all-pdfs/${profile}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                restoreButton(button);
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to download PDFs: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                restoreButton(button);
+                console.error('Error:', error);
+                alert('An unexpected error occurred.');
+            });
+        }
+
+        function unlockBook(asin, event) {
+            event.stopPropagation();  // Prevent any parent click handlers
+    
+            if (!confirm('Are you sure you want to unlock this book? This will allow you to try downloading it again.')) {
+                return;
+            }
+
+            fetch('/unlock-book', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    asin: asin
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert(`Failed to unlock book: ${result.error}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while unlocking the book.');
+            });
+        }
+    </script>
+
+</body>
+</html>

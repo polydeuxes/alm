@@ -1,0 +1,13 @@
+services:
+  alm:
+    container_name: audible
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: 1000:1000
+    ports:
+      - "5000:5000"
+    volumes:
+      - "${MEDIA}/audible:/books"
+      - "./audible_config:/home/user/.audible"
+    restart: unless-stopped
