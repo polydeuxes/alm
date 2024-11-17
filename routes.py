@@ -365,11 +365,6 @@ def download_cover_route(profile, asin):
     """Handle cover download request"""
     return jsonify(download_content(profile, asin, DownloadType.COVER))
 
-@app.route('/download-pdf/<profile>/<asin>', methods=['POST'])
-def download_pdf_route(profile, asin):
-    """Handle PDF download request"""
-    return jsonify(download_content(profile, asin, DownloadType.PDF))
-
 @app.route('/download-all/<profile>', methods=['POST'])
 def download_all(profile):
     """Download all missing books for a profile"""
@@ -460,6 +455,32 @@ def download_all_covers(profile):
         config.logger.error(f"Bulk cover download failed: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/download-pdf/<profile>/<asin>', methods=['POST'])
+def download_pdf_route(profile, asin):
+    """Handle PDF download request"""
+    result = download_content(profile, asin, DownloadType.PDF)
+    
+    # If no PDF is available, return a properly formatted response
+    if not result['success'] and 'message' in result and 'No PDF available' in result['message']:
+        return jsonify({
+            'success': False,
+            'error': f"No PDF available for this book"
+        })
+    
+    # For other failures, return the error message
+    if not result['success']:
+        return jsonify({
+            'success': False,
+            'error': result.get('error', 'Unknown error during PDF download')
+        })
+    
+    # For successful downloads
+    return jsonify({
+        'success': True,
+        'file': result.get('file', ''),
+        'message': result.get('message', 'PDF downloaded successfully')
+    })
+
 @app.route('/download-all-pdfs/<profile>', methods=['POST'])
 def download_all_pdfs(profile):
     """Download all missing PDFs for a profile"""
@@ -469,7 +490,7 @@ def download_all_pdfs(profile):
         to_download = [
             asin for asin, book in library.items()
             if profile in book.get('profiles', [])
-            and ('pdf_available' not in book or 
+            and ('pdf_available' not in book or
                  (book.get('pdf_available', True) and not book.get('pdf_file')))
         ]
 
@@ -486,12 +507,14 @@ def download_all_pdfs(profile):
             result = download_content(profile, asin, DownloadType.PDF)
             if result['success']:
                 results['downloaded'] += 1
-            elif "No PDF available" in result.get('message', ''):
+            elif result.get('message') == 'No PDF available for this book':
                 results['not_available'] += 1
             else:
                 results['failed'] += 1
+                book = library.get(asin, {})
                 results['failures'].append({
                     'asin': asin,
+                    'title': book.get('amazon_title', 'Unknown'),
                     'error': result.get('error', 'Unknown error')
                 })
 

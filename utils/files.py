@@ -53,9 +53,12 @@ def get_download_config(download_type: DownloadType) -> DownloadConfig:
             cli_args=['download', '--pdf'],
             output_dir=config.PDF_DIR,
             db_path_field='pdf_file',
-            db_size_field='pdf_size',
+            db_size_field='pdf_size',  # Added size field for PDFs
             file_patterns=['.pdf'],
-            extra_fields={'pdf_available': lambda _: True}
+            extra_fields={
+                'pdf_available': lambda _: True,
+                'pdf_size': lambda path: path.stat().st_size  # Add function to get PDF size
+            }
         )
     }
     return configs[download_type]
@@ -71,109 +74,139 @@ def download_content(profile: str, asin: str, download_type: DownloadType, optio
         config.logger.info(f"Starting {download_type.value} download for '{book_title}' (ASIN: {asin})")
         download_cfg = get_download_config(download_type)
 
-        # Build and run command
+        # Build command
         cmd = ['audible', '-P', profile] + download_cfg.cli_args + ['--asin', asin, '--output-dir', str(download_cfg.output_dir)]
-        config.logger.debug(f"Running command: {' '.join(cmd)}")
+        cmd_str = ' '.join(cmd)
+        config.logger.info(f"Executing command: {cmd_str}")
+
+        # Run command and capture output
+        result = run_command(cmd)
         
-        # Create a process to get real-time output
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            bufsize=1
-        )
-
-        last_progress_time = 0
-        progress_interval = 15  # seconds
-        download_complete = False
-
-        # Read output in real-time
-        while True:
-            output_line = process.stderr.readline()
-            if output_line == '' and process.poll() is not None:
-                break
-            if output_line:
-                # Check for progress indicator
-                if '%|' in output_line:
-                    current_time = time.time()
-                    if current_time - last_progress_time >= progress_interval:
-                        try:
-                            # Extract percentage
-                            percentage = output_line.split('%|')[0].split()[-1]
-                            config.logger.info(f"Downloading '{book_title}': {percentage}%")
-                            last_progress_time = current_time
-                        except Exception:
-                            pass
-                # Check if download is complete
-                if '100%|' in output_line:
-                    download_complete = True
-
-        # Get the final result
-        stdout, stderr = process.communicate()
-        result = {
-            'success': process.returncode == 0,
-            'output': stdout,
-            'error': stderr,
-            'code': process.returncode
-        }
-
+        # Log complete command output
         output = (result.get('output', '') or '') + (result.get('error', '') or '')
-        config.logger.debug(f"Command output for ASIN {asin}: {output}")
+        config.logger.info(f"Command output: {output}")
 
-        # Only mark as locked if we get specific error indicators
-        if "This title is not available" in output or "no downloadable content found" in output:
-            config.logger.warning(f"Book '{book_title}' appears to be locked or unavailable.")
-            library[asin]['locked'] = True
-            save_library(library)
-            return {'success': False, 'error': 'Book is locked or unavailable'}
+        # Special handling for PDFs
+        if download_type == DownloadType.PDF:
+            no_pdf_indicators = [
+                "no pdf available",
+                "no downloadable content found",
+                "no pdf found",
+                "no companion pdf"
+            ]
+            if any(indicator in output.lower() for indicator in no_pdf_indicators):
+                config.logger.info(f"No PDF available for '{book_title}'")
+                library[asin]['pdf_available'] = False
+                save_library(library)
+                return {'success': False, 'message': 'No PDF available for this book'}
+        
+        # Check if file already exists message is present
+        if "already exists" in output:
+            # Extract filename from the output
+            output_lines = output.split('\n')
+            for line in output_lines:
+                if "already exists" in line:
+                    # Extract the file path from the message
+                    file_path = line.split('File ')[-1].split(' already exists')[0].strip()
+                    config.logger.info(f"Found existing file: {file_path}")
+                    
+                    path = Path(file_path)
+                    if path.exists():
+                        # Update library with file info
+                        library[asin][download_cfg.db_path_field] = str(path)
+                        
+                        # Update size if configured
+                        if download_cfg.db_size_field:
+                            library[asin][download_cfg.db_size_field] = path.stat().st_size
+                        
+                        # Handle any extra fields
+                        if download_cfg.extra_fields:
+                            for field, value_func in download_cfg.extra_fields.items():
+                                library[asin][field] = value_func(path)
+                        
+                        # For PDFs specifically, mark as available
+                        if download_type == DownloadType.PDF:
+                            library[asin]['pdf_available'] = True
+                        
+                        save_library(library)
+                        return {'success': True, 'file': str(path), 'message': 'File already existed'}
+        
+        # Look for new downloads
+        for line in output.split('\n'):
+            if any(x in line.lower() for x in ['downloading to:', 'saved to:', 'saving to:']):
+                file_path = line.split(':')[-1].strip()
+                config.logger.info(f"Found new downloaded file: {file_path}")
+                
+                path = Path(file_path)
+                if path.exists():
+                    # Update library with file info
+                    library[asin][download_cfg.db_path_field] = str(path)
+                    
+                    # Update size if configured
+                    if download_cfg.db_size_field:
+                        library[asin][download_cfg.db_size_field] = path.stat().st_size
+                    
+                    # Handle any extra fields
+                    if download_cfg.extra_fields:
+                        for field, value_func in download_cfg.extra_fields.items():
+                            library[asin][field] = value_func(path)
+                    
+                    # For PDFs specifically, mark as available
+                    if download_type == DownloadType.PDF:
+                        library[asin]['pdf_available'] = True
+                    
+                    save_library(library)
+                    return {'success': True, 'file': str(path)}
 
-        # Wait for filesystem to sync
-        time.sleep(2)
-
-        # Check output directory for new files
+        # Search for files in the output directory
         output_dir = Path(download_cfg.output_dir)
         expected_patterns = [f"*{pattern}" for pattern in download_cfg.file_patterns]
         
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            files_found = []
-            for pattern in expected_patterns:
-                files_found.extend(list(output_dir.glob(pattern)))
+        files_found = []
+        for pattern in expected_patterns:
+            found = list(output_dir.glob(pattern))
+            config.logger.debug(f"Found {len(found)} files matching pattern {pattern}: {found}")
+            files_found.extend(found)
 
-            # Filter to find files modified in the last 5 minutes
-            recent_files = [f for f in files_found if (time.time() - f.stat().st_mtime) < 300]
+        # Filter for recent files
+        recent_files = [f for f in files_found if (time.time() - f.stat().st_mtime) < 300]
 
-            if recent_files:
-                for file_path in recent_files:
-                    if file_path.suffix == '.aax':
-                        library[asin]['audible_file'] = str(file_path)
-                        library[asin]['audible_size'] = file_path.stat().st_size
-                        library[asin]['audible_format'] = 'aax'
-                    elif file_path.suffix == '.aaxc':
-                        library[asin]['audible_file'] = str(file_path)
-                        library[asin]['audible_size'] = file_path.stat().st_size
-                        library[asin]['audible_format'] = 'aaxc'
-                    elif file_path.suffix == '.voucher':
-                        library[asin]['voucher_file'] = str(file_path)
-
-                save_library(library)
-                return {'success': True, 'file': str(recent_files[0])}
+        if recent_files:
+            file_path = recent_files[0]
+            config.logger.info(f"Using recently modified file: {file_path}")
             
-            if download_complete:
-                config.logger.warning(f"Download reported complete but no files found for '{book_title}' (attempt {attempt + 1}/{max_attempts})")
-            else:
-                config.logger.warning(f"No files found yet for '{book_title}' (attempt {attempt + 1}/{max_attempts})")
+            # Update library with file info
+            library[asin][download_cfg.db_path_field] = str(file_path)
             
-            # Wait between attempts
-            if attempt < max_attempts - 1:
-                time.sleep(5)
+            # Update size if configured
+            if download_cfg.db_size_field:
+                library[asin][download_cfg.db_size_field] = file_path.stat().st_size
+            
+            # Handle any extra fields
+            if download_cfg.extra_fields:
+                for field, value_func in download_cfg.extra_fields.items():
+                    library[asin][field] = value_func(file_path)
+            
+            # For PDFs specifically, mark as available
+            if download_type == DownloadType.PDF:
+                library[asin]['pdf_available'] = True
+            
+            save_library(library)
+            return {'success': True, 'file': str(file_path)}
 
-        config.logger.error(f"No files found for '{book_title}' after {max_attempts} attempts")
-        return {'success': False, 'error': 'No files found after download'}
+        # If we get here for a PDF and haven't found anything, mark as unavailable
+        if download_type == DownloadType.PDF:
+            library[asin]['pdf_available'] = False
+            save_library(library)
+            
+        return {'success': False, 'error': 'Could not find or verify file'}
 
     except Exception as e:
         config.logger.error(f"{download_type.value.capitalize()} download failed for ASIN {asin}: {e}", exc_info=True)
+        # For PDFs, mark as unavailable on error
+        if download_type == DownloadType.PDF:
+            library[asin]['pdf_available'] = False
+            save_library(library)
         return {'success': False, 'error': str(e)}
 
 def get_file_status(asin):
@@ -211,7 +244,6 @@ def get_file_status(asin):
 
     return status
 
-# Book conversion functionality
 def get_activation_bytes(profile_name):
     """Get activation bytes for a profile from disk or fetch and save them"""
     try:
@@ -221,19 +253,34 @@ def get_activation_bytes(profile_name):
         if activation_file.exists():
             config.logger.debug(f"Loading existing activation bytes for profile {profile_name}")
             with open(activation_file) as f:
-                return f.read().strip()
+                content = f.read().strip()
+                # If file contains multiple lines, get the last line which should be the hex code
+                activation_bytes = content.split('\n')[-1].strip()
+                # Verify it looks like a valid activation bytes string
+                if len(activation_bytes) == 8 and all(c in '0123456789abcdefABCDEF' for c in activation_bytes):
+                    return activation_bytes
+                else:
+                    config.logger.warning(f"Invalid activation bytes in file, refetching")
 
         # Fetch activation bytes from Audible CLI
         config.logger.info(f"Fetching new activation bytes for profile {profile_name}")
-        result = run_command(f'audible -P {profile_name} activation-bytes')
+        result = run_command(['audible', '-P', profile_name, 'activation-bytes'])
 
-        if result['success'] and result['output']:
-            activation_bytes = result['output'].strip()  # Get the output directly
-            # Save for future use
-            with open(activation_file, 'w') as f:
-                f.write(activation_bytes)
-            config.logger.debug(f"Saved new activation bytes for profile {profile_name}")
-            return activation_bytes
+        if result['success']:
+            # Parse output to get just the activation bytes
+            output_lines = result['output'].strip().split('\n')
+            # Get the last non-empty line which should be the hex code
+            activation_bytes = next((line.strip() for line in reversed(output_lines) if line.strip()), None)
+            
+            if activation_bytes and len(activation_bytes) == 8 and all(c in '0123456789abcdefABCDEF' for c in activation_bytes):
+                # Save only the hex code
+                with open(activation_file, 'w') as f:
+                    f.write(activation_bytes)
+                config.logger.debug(f"Saved new activation bytes for profile {profile_name}")
+                return activation_bytes
+            else:
+                config.logger.error(f"Invalid activation bytes format: {activation_bytes}")
+                return None
 
         config.logger.error(f"Failed to get activation bytes for profile {profile_name}: {result['error']}")
         return None
@@ -242,6 +289,7 @@ def get_activation_bytes(profile_name):
         return None
 
 def convert_book(asin):
+    """Convert a book to M4B format"""
     try:
         library = load_library()
         if asin not in library:
@@ -273,7 +321,7 @@ def convert_book(asin):
             source_size = Path(book['audible_file']).stat().st_size
             m4b_size = output_file.stat().st_size
             size_ratio = m4b_size / source_size
-            
+
             if size_ratio < 0.9:  # If M4B is less than 90% of source size
                 config.logger.warning(f"M4B file for '{book_title}' appears incomplete (size ratio: {size_ratio:.2%}). Deleting.")
                 output_file.unlink()
@@ -282,21 +330,50 @@ def convert_book(asin):
                 library[asin]['m4b_file'] = str(output_file)
                 library[asin]['m4b_size'] = m4b_size
                 save_library(library)
-                conversion_status[asin] = 'completed'
                 return {'success': True, 'file': str(output_file)}
 
         conversion_status[asin] = 'converting'
         config.logger.info(f"Starting conversion for '{book_title}'")
 
-        # Handle AAXC files with voucher
-        if book['audible_format'] == 'aaxc':
+        # Handle AAX files with activation bytes
+        if book['audible_format'] == 'aax':
+            profiles = book.get('profiles', [])
+            if not profiles:
+                error_msg = f"No profile found for '{book_title}'"
+                config.logger.error(error_msg)
+                return {'success': False, 'error': error_msg}
+
+            activation_bytes = None
+            for profile in profiles:
+                activation_bytes = get_activation_bytes(profile)
+                if activation_bytes:
+                    break
+
+            if not activation_bytes:
+                error_msg = f"Could not get activation bytes for '{book_title}'"
+                config.logger.error(error_msg)
+                return {'success': False, 'error': error_msg}
+
+            config.logger.debug(f"Using activation bytes for conversion: {activation_bytes}")
+
+            # Use list format for command
+            result = run_command([
+                'ffmpeg', '-y',
+                '-activation_bytes', activation_bytes,
+                '-i', book['audible_file'],
+                '-c:a', 'copy',
+                '-c:s', 'copy',
+                '-c:v', 'copy',
+                str(output_file)
+            ])
+            
+        elif book['audible_format'] == 'aaxc':
+            # Handle AAXC files with voucher
             if not book.get('voucher_file'):
                 error_msg = f"No voucher file found for AAXC format: '{book_title}'"
                 config.logger.error(error_msg)
-                conversion_status[asin] = 'failed'
                 return {'success': False, 'error': error_msg}
 
-            # Parse voucher file for key and iv
             with open(book['voucher_file'], 'r') as vf:
                 voucher = json.load(vf)
 
@@ -309,50 +386,20 @@ def convert_book(asin):
                 config.logger.error(error_msg)
                 return {'success': False, 'error': error_msg}
 
-            # Construct ffmpeg command with key/iv flags
-            conversion_cmd = (
-                f'ffmpeg -y -audible_key {key} -audible_iv {iv} '
-                f'-i "{book["audible_file"]}" '
-                f'-c:a copy -c:v copy -c:s copy "{output_file}"'
-            )
-
-        # Handle AAX files with activation bytes
-        elif book['audible_format'] == 'aax':
-            profiles = book.get('profiles', [])
-            if not profiles:
-                error_msg = f"No profile found for '{book_title}'"
-                config.logger.error(error_msg)
-                conversion_status[asin] = 'failed'
-                return {'success': False, 'error': error_msg}
-
-            activation_bytes = None
-            for profile in profiles:
-                activation_bytes = get_activation_bytes(profile)
-                if activation_bytes:
-                    break
-
-            if not activation_bytes:
-                error_msg = f"Could not get activation bytes for '{book_title}'"
-                config.logger.error(error_msg)
-                conversion_status[asin] = 'failed'
-                return {'success': False, 'error': error_msg}
-
-            # Construct ffmpeg command
-            conversion_cmd = (
-                f'ffmpeg -y -activation_bytes {activation_bytes} '
-                f'-i "{book["audible_file"]}" '
-                f'-c:a copy -c:s copy -c:v copy "{output_file}"'
-            )
+            result = run_command([
+                'ffmpeg', '-y',
+                '-audible_key', key,
+                '-audible_iv', iv,
+                '-i', book['audible_file'],
+                '-c:a', 'copy',
+                '-c:v', 'copy',
+                '-c:s', 'copy',
+                str(output_file)
+            ])
         else:
             error_msg = f"Unsupported format: {book['audible_format']}"
             config.logger.error(error_msg)
             return {'success': False, 'error': error_msg}
-
-        # Log the constructed ffmpeg command
-        config.logger.debug(f"FFmpeg command: {conversion_cmd}")
-
-        # Execute the conversion command
-        result = run_command(conversion_cmd)
 
         if result['success']:
             library[asin]['m4b_file'] = str(output_file)
