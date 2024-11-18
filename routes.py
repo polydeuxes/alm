@@ -626,7 +626,7 @@ def download_file():
 
 @app.route('/delete-file', methods=['POST'])
 def delete_file():
-    """Delete a file and update library"""
+    """Delete a file and any associated files (like vouchers), updating library."""
     try:
         data = request.get_json()
         asin = data.get('asin')
@@ -640,44 +640,54 @@ def delete_file():
             return jsonify({'success': False, 'error': 'Book not found'})
 
         book = library[asin]
-        file_path = None
-        file_to_delete = None
+        files_deleted = []
 
         if file_type == 'audible':
+            # Delete main audio file
             if book.get('audible_file'):
-                file_to_delete = Path(book['audible_file'])
-                # Also delete voucher file if it exists
-                if book.get('voucher_file'):
-                    try:
-                        voucher_path = Path(book['voucher_file'])
-                        if voucher_path.exists():
-                            voucher_path.unlink()
-                        del book['voucher_file']
-                    except Exception as e:
-                        config.logger.error(f"Error deleting voucher file: {e}")
+                try:
+                    audio_path = Path(book['audible_file'])
+                    if audio_path.exists():
+                        audio_path.unlink()
+                        config.logger.info(f"Deleted audio file: {audio_path}")
+                        files_deleted.append(str(audio_path))
+                except Exception as e:
+                    config.logger.error(f"Error deleting audio file: {e}")
 
+                # Clean up associated fields
                 del book['audible_file']
                 del book['audible_size']
                 if 'audible_format' in book:
                     del book['audible_format']
 
+            # Always check and clean up voucher file if it exists
+            if book.get('voucher_file'):
+                try:
+                    voucher_path = Path(book['voucher_file'])
+                    if voucher_path.exists():
+                        voucher_path.unlink()
+                        config.logger.info(f"Deleted voucher file: {voucher_path}")
+                        files_deleted.append(str(voucher_path))
+                except Exception as e:
+                    config.logger.error(f"Error deleting voucher file: {e}")
+                del book['voucher_file']
+
         elif file_type == 'm4b':
             if book.get('m4b_file'):
-                file_to_delete = Path(book['m4b_file'])
+                try:
+                    m4b_path = Path(book['m4b_file'])
+                    if m4b_path.exists():
+                        m4b_path.unlink()
+                        config.logger.info(f"Deleted M4B file: {m4b_path}")
+                        files_deleted.append(str(m4b_path))
+                except Exception as e:
+                    config.logger.error(f"Error deleting M4B file: {e}")
+
                 del book['m4b_file']
                 del book['m4b_size']
 
-        if file_to_delete:
-            try:
-                if file_to_delete.exists():
-                    file_to_delete.unlink()
-                save_library(library)
-                return jsonify({'success': True})
-            except Exception as e:
-                config.logger.error(f"Error deleting file: {e}")
-                return jsonify({'success': False, 'error': str(e)})
-
-        return jsonify({'success': False, 'error': 'File not found'})
+        save_library(library)
+        return jsonify({'success': True, 'deleted': files_deleted})
 
     except Exception as e:
         config.logger.error(f"Error in delete_file: {e}")

@@ -74,139 +74,126 @@ def download_content(profile: str, asin: str, download_type: DownloadType, optio
         config.logger.info(f"Starting {download_type.value} download for '{book_title}' (ASIN: {asin})")
         download_cfg = get_download_config(download_type)
 
-        # Build command
         cmd = ['audible', '-P', profile] + download_cfg.cli_args + ['--asin', asin, '--output-dir', str(download_cfg.output_dir)]
         cmd_str = ' '.join(cmd)
         config.logger.info(f"Executing command: {cmd_str}")
 
-        # Run command and capture output
         result = run_command(cmd)
-        
-        # Log complete command output
         output = (result.get('output', '') or '') + (result.get('error', '') or '')
         config.logger.info(f"Command output: {output}")
 
-        # Special handling for PDFs
-        if download_type == DownloadType.PDF:
-            no_pdf_indicators = [
-                "no pdf available",
+        # Handle locked books check
+        if download_type == DownloadType.BOOK:
+            if any(x in output.lower() for x in [
+                "not available in your library",
                 "no downloadable content found",
-                "no pdf found",
-                "no companion pdf"
-            ]
-            if any(indicator in output.lower() for indicator in no_pdf_indicators):
-                config.logger.info(f"No PDF available for '{book_title}'")
+                "title not found",
+                "this title is not available",
+                "unable to download"
+            ]):
+                config.logger.warning(f"Book '{book_title}' is locked - marking in library")
+                library[asin]['locked'] = True
+                save_library(library)
+                return {'success': False, 'error': 'Book is locked or unavailable'}
+
+        # Handle PDF availability check
+        if download_type == DownloadType.PDF:
+            if any(x in output for x in ["No PDF found", "No companion PDF"]):
+                config.logger.info(f"No PDF available for '{book_title}' - marking as unavailable")
                 library[asin]['pdf_available'] = False
                 save_library(library)
                 return {'success': False, 'message': 'No PDF available for this book'}
-        
-        # Check if file already exists message is present
+
+        # Handle existing files
         if "already exists" in output:
-            # Extract filename from the output
-            output_lines = output.split('\n')
-            for line in output_lines:
+            found_audio = False
+            found_voucher = False
+            audio_path = None
+
+            for line in output.split('\n'):
                 if "already exists" in line:
-                    # Extract the file path from the message
                     file_path = line.split('File ')[-1].split(' already exists')[0].strip()
+                    path = Path(file_path)
                     config.logger.info(f"Found existing file: {file_path}")
                     
-                    path = Path(file_path)
-                    if path.exists():
-                        # Update library with file info
-                        library[asin][download_cfg.db_path_field] = str(path)
-                        
-                        # Update size if configured
-                        if download_cfg.db_size_field:
-                            library[asin][download_cfg.db_size_field] = path.stat().st_size
-                        
-                        # Handle any extra fields
-                        if download_cfg.extra_fields:
-                            for field, value_func in download_cfg.extra_fields.items():
-                                library[asin][field] = value_func(path)
-                        
-                        # For PDFs specifically, mark as available
-                        if download_type == DownloadType.PDF:
-                            library[asin]['pdf_available'] = True
-                        
+                    if path.suffix == '.aaxc':
+                        size = path.stat().st_size
+                        if size < 10000:  # Voucher file
+                            library[asin]['voucher_file'] = str(path)
+                            found_voucher = True
+                            config.logger.info(f"Found voucher file ({size} bytes): {path}")
+                        else:  # Audio file
+                            library[asin]['audible_file'] = str(path)
+                            library[asin]['audible_size'] = size
+                            library[asin]['audible_format'] = 'aaxc'
+                            found_audio = True
+                            audio_path = path
+                            config.logger.info(f"Found AAXC audio file ({size} bytes): {path}")
+                    elif path.suffix == '.aax':
+                        library[asin]['audible_file'] = str(path)
+                        library[asin]['audible_size'] = path.stat().st_size
+                        library[asin]['audible_format'] = 'aax'
                         save_library(library)
-                        return {'success': True, 'file': str(path), 'message': 'File already existed'}
-        
-        # Look for new downloads
-        for line in output.split('\n'):
-            if any(x in line.lower() for x in ['downloading to:', 'saved to:', 'saving to:']):
-                file_path = line.split(':')[-1].strip()
-                config.logger.info(f"Found new downloaded file: {file_path}")
-                
-                path = Path(file_path)
-                if path.exists():
-                    # Update library with file info
-                    library[asin][download_cfg.db_path_field] = str(path)
-                    
-                    # Update size if configured
-                    if download_cfg.db_size_field:
-                        library[asin][download_cfg.db_size_field] = path.stat().st_size
-                    
-                    # Handle any extra fields
-                    if download_cfg.extra_fields:
-                        for field, value_func in download_cfg.extra_fields.items():
-                            library[asin][field] = value_func(path)
-                    
-                    # For PDFs specifically, mark as available
-                    if download_type == DownloadType.PDF:
+                        return {'success': True, 'file': str(path)}
+                    elif path.suffix == '.pdf':
+                        library[asin]['pdf_file'] = str(path)
+                        library[asin]['pdf_size'] = path.stat().st_size
                         library[asin]['pdf_available'] = True
-                    
-                    save_library(library)
-                    return {'success': True, 'file': str(path)}
+                        save_library(library)
+                        return {'success': True, 'file': str(path)}
 
-        # Search for files in the output directory
+            # Return success if we found the AAXC audio file
+            if found_audio:
+                save_library(library)
+                return {'success': True, 'file': str(audio_path)}
+
+        # Look for new downloads
         output_dir = Path(download_cfg.output_dir)
-        expected_patterns = [f"*{pattern}" for pattern in download_cfg.file_patterns]
-        
-        files_found = []
-        for pattern in expected_patterns:
-            found = list(output_dir.glob(pattern))
-            config.logger.debug(f"Found {len(found)} files matching pattern {pattern}: {found}")
-            files_found.extend(found)
+        found_files = list(output_dir.glob(f"*{asin}*"))
+        recent_files = [f for f in found_files if (time.time() - f.stat().st_mtime) < 300]
 
-        # Filter for recent files
-        recent_files = [f for f in files_found if (time.time() - f.stat().st_mtime) < 300]
-
-        if recent_files:
-            file_path = recent_files[0]
-            config.logger.info(f"Using recently modified file: {file_path}")
-            
-            # Update library with file info
-            library[asin][download_cfg.db_path_field] = str(file_path)
-            
-            # Update size if configured
-            if download_cfg.db_size_field:
-                library[asin][download_cfg.db_size_field] = file_path.stat().st_size
-            
-            # Handle any extra fields
-            if download_cfg.extra_fields:
-                for field, value_func in download_cfg.extra_fields.items():
-                    library[asin][field] = value_func(file_path)
-            
-            # For PDFs specifically, mark as available
-            if download_type == DownloadType.PDF:
+        for file_path in recent_files:
+            if file_path.suffix == '.aaxc':
+                size = file_path.stat().st_size
+                if size < 10000:  # Voucher file
+                    library[asin]['voucher_file'] = str(file_path)
+                    config.logger.info(f"Found new voucher file ({size} bytes): {file_path}")
+                else:  # Audio file
+                    library[asin]['audible_file'] = str(file_path)
+                    library[asin]['audible_size'] = size
+                    library[asin]['audible_format'] = 'aaxc'
+                    config.logger.info(f"Found new AAXC audio file ({size} bytes): {file_path}")
+                    save_library(library)
+                    return {'success': True, 'file': str(file_path)}
+            elif file_path.suffix == '.aax':
+                library[asin]['audible_file'] = str(file_path)
+                library[asin]['audible_size'] = file_path.stat().st_size
+                library[asin]['audible_format'] = 'aax'
+                save_library(library)
+                return {'success': True, 'file': str(file_path)}
+            elif file_path.suffix == '.pdf':
+                library[asin]['pdf_file'] = str(file_path)
+                library[asin]['pdf_size'] = file_path.stat().st_size
                 library[asin]['pdf_available'] = True
-            
-            save_library(library)
-            return {'success': True, 'file': str(file_path)}
+                save_library(library)
+                return {'success': True, 'file': str(file_path)}
 
-        # If we get here for a PDF and haven't found anything, mark as unavailable
-        if download_type == DownloadType.PDF:
+        # If we got here and found nothing, handle specific cases
+        if download_type == DownloadType.BOOK and not recent_files:
+            config.logger.warning(f"No files found for '{book_title}' - checking if locked")
+            library[asin]['locked'] = True
+            save_library(library)
+            return {'success': False, 'error': 'Book appears to be locked (no files found)'}
+        elif download_type == DownloadType.PDF:
+            config.logger.info(f"No PDF found for '{book_title}' - marking as unavailable")
             library[asin]['pdf_available'] = False
             save_library(library)
-            
+            return {'success': False, 'message': 'No PDF available'}
+
         return {'success': False, 'error': 'Could not find or verify file'}
 
     except Exception as e:
         config.logger.error(f"{download_type.value.capitalize()} download failed for ASIN {asin}: {e}", exc_info=True)
-        # For PDFs, mark as unavailable on error
-        if download_type == DownloadType.PDF:
-            library[asin]['pdf_available'] = False
-            save_library(library)
         return {'success': False, 'error': str(e)}
 
 def get_file_status(asin):
