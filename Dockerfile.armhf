@@ -4,7 +4,6 @@ FROM python:3.12-slim AS build
 # Install build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    ffmpeg \
     gcc \
     python3-dev \
     libjpeg-dev \
@@ -14,8 +13,7 @@ RUN apt-get update && \
     libopenjp2-7-dev \
     libtiff5-dev \
     libwebp-dev \
-    build-essential && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    build-essential
 
 # Install and build psutil and Pillow from source
 RUN pip install --no-cache-dir --no-binary=:all: psutil pillow
