@@ -1,0 +1,60 @@
+# Stage 1: Build stage for compiling psutil and Pillow for armhf
+FROM python:3.12-slim AS build
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ffmpeg \
+    gcc \
+    python3-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    libfreetype6-dev \
+    liblcms2-dev \
+    libopenjp2-7-dev \
+    libtiff5-dev \
+    libwebp-dev \
+    build-essential && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install and build psutil and Pillow from source
+RUN pip install --no-cache-dir --no-binary=:all: psutil pillow
+
+# Stage 2: Final runtime image
+FROM python:3.12-slim
+
+# Copy ffmpeg since it is a runtime dependency
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy compiled libraries from build stage
+COPY --from=build /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+
+# Install runtime dependencies
+RUN pip install --no-cache-dir audible-cli flask gunicorn
+
+RUN groupadd -g 1000 user && \
+    useradd -m -u 1000 -g 1000 -s /bin/bash user
+
+RUN mkdir -p /home/user/.audible && \
+    chown -R user:user /home/user/.audible
+
+WORKDIR /app
+RUN mkdir -p /app/utils && \
+    mkdir -p /app/templates && \
+    chown -R user:user /app
+
+COPY config.py /app/
+COPY app.py /app/
+COPY routes.py /app/
+COPY templates/*.html /app/templates/
+COPY utils/*.py /app/utils/
+
+RUN chown -R user:user /app
+
+USER user
+
+EXPOSE 5000
+
+CMD ["gunicorn", "--workers=1", "--bind=0.0.0.0:5000", "--timeout=0", "app:app"]
