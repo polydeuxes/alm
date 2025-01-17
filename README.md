@@ -40,7 +40,7 @@ docker-compose up --build -d
   /m4b      # For converted M4B files
   /pdf      # For companion PDFs
   /images   # For cover images
-/audible_config    # For configuration files and profiles
+/home/user/.audible     # For configuration files and profiles
 ```
 
 ## First Time Setup
