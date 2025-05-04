@@ -10,7 +10,7 @@ from utils.library import load_library, save_library
 conversion_status = {}
 
 def convert_book(asin):
-    """Convert a book to M4B format without using common.py"""
+    """Convert a book to M4B format with cover image embedding"""
     try:
         library = load_library()
         if asin not in library:
@@ -56,6 +56,15 @@ def convert_book(asin):
         conversion_status[asin] = 'converting'
         config.logger.info(f"Starting conversion for '{book_title}'")
 
+        # Check if we have a cover image
+        cover_path = book.get('cover_path')
+        has_cover = cover_path and Path(cover_path).exists()
+        
+        if has_cover:
+            config.logger.info(f"Found cover image for '{book_title}': {cover_path}")
+        else:
+            config.logger.info(f"No cover image found for '{book_title}'")
+
         # Handle AAX files with activation bytes
         if book['audible_format'] == 'aax':
             profiles = book.get('profiles', [])
@@ -77,16 +86,28 @@ def convert_book(asin):
 
             config.logger.debug(f"Using activation bytes for conversion")
             
-            # Use ffmpeg directly without run_command
-            result = run_ffmpeg_conversion([
-                'ffmpeg', '-y',
-                '-activation_bytes', activation_bytes,
-                '-i', book['audible_file'],
-                '-c:a', 'copy',
-                '-c:s', 'copy',
-                '-c:v', 'copy',
-                str(output_file)
-            ])
+            # Build the command based on whether we have a cover
+            if has_cover:
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-activation_bytes', activation_bytes,
+                    '-i', book['audible_file'],
+                    '-i', cover_path,
+                    '-map', '0:a', '-map', '0:s?', '-map', '1:v',
+                    '-c:a', 'copy', '-c:s', 'copy', 
+                    '-c:v', 'copy', '-disposition:v', 'attached_pic',
+                    str(output_file)
+                ]
+            else:
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-activation_bytes', activation_bytes,
+                    '-i', book['audible_file'],
+                    '-c:a', 'copy', '-c:s', 'copy', '-c:v', 'copy',
+                    str(output_file)
+                ]
+            
+            result = run_ffmpeg_conversion(cmd)
             
         elif book['audible_format'] == 'aaxc':
             # Handle AAXC files with voucher
@@ -107,16 +128,30 @@ def convert_book(asin):
                 config.logger.error(error_msg)
                 return {'success': False, 'error': error_msg}
 
-            result = run_ffmpeg_conversion([
-                'ffmpeg', '-y',
-                '-audible_key', key,
-                '-audible_iv', iv,
-                '-i', book['audible_file'],
-                '-c:a', 'copy',
-                '-c:v', 'copy',
-                '-c:s', 'copy',
-                str(output_file)
-            ])
+            # Build the command based on whether we have a cover
+            if has_cover:
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-audible_key', key,
+                    '-audible_iv', iv,
+                    '-i', book['audible_file'],
+                    '-i', cover_path,
+                    '-map', '0:a', '-map', '0:s?', '-map', '1:v',
+                    '-c:a', 'copy', '-c:s', 'copy', 
+                    '-c:v', 'copy', '-disposition:v', 'attached_pic',
+                    str(output_file)
+                ]
+            else:
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-audible_key', key,
+                    '-audible_iv', iv,
+                    '-i', book['audible_file'],
+                    '-c:a', 'copy', '-c:s', 'copy', '-c:v', 'copy',
+                    str(output_file)
+                ]
+                
+            result = run_ffmpeg_conversion(cmd)
         else:
             error_msg = f"Unsupported format: {book['audible_format']}"
             config.logger.error(error_msg)
@@ -138,7 +173,6 @@ def convert_book(asin):
         conversion_status[asin] = 'failed'
         config.logger.error(f"Conversion failed: {e}", exc_info=True)
         return {'success': False, 'error': str(e)}
-
 
 def get_activation_bytes_clean(profile_name):
     """Get activation bytes for a profile from disk or fetch and save them - clean implementation"""
