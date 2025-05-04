@@ -262,37 +262,6 @@
                     document.getElementById('instructions').innerHTML = result.instructions;
                     document.getElementById('authSteps').style.display = 'block';
                     document.getElementById('activationForm').style.display = 'block';
-                } else {
-                    alert('Failed to start setup: ' + (result.error || 'Unknown error'));
-                }
-            } catch (error) {
-                alert('Error: ' + error.message);
-            }
-        }
-
-        async function startAdditionalSetup(event) {
-            try {
-                const formData = new FormData(event.target);
-                const response = await fetch('/add-profile', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    document.getElementById('profileForm').style.display = 'none';
-                    document.getElementById('setupInstructions').innerHTML = `
-                        <h3>Setup Steps:</h3>
-                        <ol>
-                            <li>Auth file created: ${result.auth_file}</li>
-                            <li>Complete authentication using the URL below</li>
-                            <li>Profile will be added to config automatically</li>
-                        </ol>
-                    `;
-                    document.getElementById('instructions').innerHTML = result.instructions;
-                    document.getElementById('authSteps').style.display = 'block';
-                    document.getElementById('activationForm').style.display = 'block';
                     
                     // Add event listener for activation form
                     document.getElementById('activationForm').onsubmit = async (e) => {

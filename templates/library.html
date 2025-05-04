@@ -166,17 +166,28 @@
             font-size: 0.875rem;
         }
 
+        .download-progress {
+            margin-top: 0.5rem;
+            width: 100%;
+        }
+
         .progress-bar {
             height: 4px;
             background: #E5E7EB;
             border-radius: 2px;
             overflow: hidden;
+            margin-bottom: 0.25rem;
         }
 
         .progress-bar-fill {
             height: 100%;
             background: var(--primary);
             transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
         }
 
         .profile-content {
@@ -293,7 +304,7 @@
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Rescan Library
+                Verify Library Files
             </button>
         </div>
 
@@ -352,13 +363,19 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
-                        Update Library
+                        Sync Library
                     </button>
                     <button class="btn btn-primary" onclick="event.stopPropagation(); downloadAll('{{ profile.name }}')">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                         Pull All
+                    </button>
+                    <button class="btn btn-primary" onclick="event.stopPropagation(); downloadAllImages('{{ profile.name }}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Pull Images
                     </button>
                     <button class="btn btn-primary" onclick="event.stopPropagation(); downloadBooks('{{ profile.name }}')">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -371,12 +388,6 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
                         Convert All
-                    </button>
-                    <button class="btn btn-primary" onclick="event.stopPropagation(); downloadAllImages('{{ profile.name }}')">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        Pull Images
                     </button>
                     <button class="btn btn-primary" onclick="event.stopPropagation(); downloadAllPDFs('{{ profile.name }}')">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -452,7 +463,7 @@
                                         </button>
                                         {% else %}
                                         <button class="btn btn-primary" onclick="pullBook('{{ profile.name }}', '{{ book.asin }}')">
-                                            Download
+                                            Pull
                                         </button>
                                         {% endif %}
                                     {% endif %}
@@ -628,6 +639,19 @@
         <div id="imageModal" class="modal" onclick="this.style.display='none'">
             <img id="modalImage" src="" alt="Book cover">
         </div>
+
+        <!-- Batch Progress Indicator -->
+        <div id="batch-progress" class="fixed bottom-0 left-0 right-0 bg-white p-4 shadow-lg border-t border-gray-200" style="display: none;">
+            <div class="container mx-auto">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <span id="batch-progress-info">Processing...</span>
+                        <span class="ml-4" id="batch-progress-count"></span>
+                    </div>
+                    <button class="btn btn-danger" onclick="cancelBatchProcess()">Cancel</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -638,6 +662,13 @@
             button.setAttribute('data-original-content', originalContent);
             button.disabled = true;
             button.innerHTML = '<span class="loading"></span> Processing...';
+    
+            // Show batch progress bar if this is a batch operation
+            if (button.getAttribute('onclick')?.includes('downloadBooks') || 
+                button.getAttribute('onclick')?.includes('convertAll') ||
+                button.getAttribute('onclick')?.includes('downloadAll')) {
+                showBatchProgress();
+            }
         }
 
         // Restore button state
@@ -646,6 +677,26 @@
             const originalContent = button.getAttribute('data-original-content');
             button.innerHTML = originalContent;
             button.disabled = false;
+
+            // Hide batch progress
+            hideBatchProgress();
+        }
+
+        function showBatchProgress() {
+            document.getElementById('batch-progress').style.display = 'block';
+            document.getElementById('batch-progress-info').textContent = 'Preparing...';
+            document.getElementById('batch-progress-count').textContent = '';
+        }
+
+        function hideBatchProgress() {
+            document.getElementById('batch-progress').style.display = 'none';
+        }
+
+        function cancelBatchProcess() {
+            if (confirm('Are you sure you want to cancel the current operation?')) {
+                hideBatchProgress();
+                window.location.reload();
+            }
         }
 
         function updateLibrary(profileName) {
@@ -706,6 +757,144 @@
                     if (el !== content) el.classList.remove('active');
                 });
                 content.classList.toggle('active');
+                if (typeof saveState === 'function') {
+                    saveState();
+                }
+            }
+        }
+
+        function updateBookRow(asin, bookData) {
+            const row = document.getElementById(`book-${asin}`);
+            if (!row) return;
+
+            // Update title area and lock status
+            const titleCell = row.querySelector('td:nth-child(2)');
+            const titleDiv = titleCell.querySelector('.font-medium');
+
+            // Handle locked status
+            if (bookData.locked) {
+                // Add lock icon if it doesn't exist
+                if (!titleDiv.querySelector('button[onclick*="unlockBook"]')) {
+                    const lockIcon = document.createElement('button');
+                    lockIcon.className = 'inline-flex items-center text-yellow-500 hover:text-yellow-600';
+                    lockIcon.title = 'Click to unlock';
+                    lockIcon.setAttribute('onclick', `unlockBook('${asin}', event)`);
+                    lockIcon.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>`;
+                    titleDiv.appendChild(lockIcon);
+                }
+            } else {
+                // Remove lock icon if it exists
+                const lockIcon = titleDiv.querySelector('button[onclick*="unlockBook"]');
+                if (lockIcon) {
+                    lockIcon.remove();
+                }
+            }
+
+            // Update Audible file cell
+            const audioCell = row.querySelector('td:nth-child(4)');
+            const audioInfo = audioCell.querySelector('.file-info');
+
+            if (bookData.audible_file) {
+                // Book has an audio file
+                audioInfo.innerHTML = `
+                    <button class="btn btn-danger" onclick="confirmDelete('${asin}', 'audible')">
+                        Delete
+                    </button>
+                    <span class="file-size">${formatFileSize(bookData.audible_size)}</span>
+                `;
+            } else if (bookData.locked) {
+                // Book is locked
+                audioInfo.innerHTML = `
+                    <button class="btn btn-warning" onclick="window.open('https://www.audible.com/pd/${asin}', '_blank')">
+                        <svg class="w-4 h-4 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                        Purchase
+                    </button>
+                `;
+            } else {
+                // Book is available for download
+                const profile = bookData.profiles && bookData.profiles.length > 0 ? bookData.profiles[0] : '';
+                audioInfo.innerHTML = `
+                    <button class="btn btn-primary" onclick="pullBook('${profile}', '${asin}')">
+                        Download
+                    </button>
+                `;
+            }
+
+            // Update M4B file cell
+            const m4bCell = row.querySelector('td:nth-child(5)');
+            const m4bInfo = m4bCell.querySelector('.file-info');
+
+            if (bookData.m4b_file) {
+                // Book has an M4B file
+                m4bInfo.innerHTML = `
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="downloadFile('${bookData.m4b_file}')">
+                            Download
+                        </button>
+                        <button class="btn btn-danger" onclick="confirmDelete('${asin}', 'm4b')">
+                            Delete
+                        </button>
+                    </div>
+                    <span class="file-size">${formatFileSize(bookData.m4b_size)}</span>
+                `;
+            } else if (bookData.audible_file) {
+                // Book has Audible file but no M4B
+                m4bInfo.innerHTML = `
+                    <button class="btn btn-success" onclick="convertBook('${asin}')">
+                        Convert
+                    </button>
+                `;
+            } else {
+                // No files available
+                m4bInfo.innerHTML = `<span class="text-gray-400">—</span>`;
+            }
+
+            // Update PDF cell if needed
+            const pdfCell = row.querySelector('td:nth-child(6)');
+            const pdfInfo = pdfCell.querySelector('.file-info');
+
+            if (bookData.pdf_file) {
+                pdfInfo.innerHTML = `
+                    <button class="btn btn-primary" onclick="window.location.href='/pdf/${asin}'">
+                        Download
+                    </button>
+                    <span class="file-size">${formatFileSize(bookData.pdf_size)}</span>
+                `;
+            } else if (bookData.pdf_available === false) {
+                pdfInfo.innerHTML = `<span class="na-badge">N/A</span>`;
+            } else {
+                // PDF might be available but not downloaded
+                const profile = bookData.profiles && bookData.profiles.length > 0 ? bookData.profiles[0] : '';
+                pdfInfo.innerHTML = `
+                    <button class="btn btn-primary" onclick="downloadPDF('${profile}', '${asin}')">
+                        Pull PDF
+                    </button>
+                `;
+            }
+        }
+
+        function formatFileSize(size) {
+            try {
+                size = parseInt(size || 0);
+                if (size == 0) return "0 B";
+
+                if (size > 1024 * 1024 * 1024) {
+                    return `${(size / (1024 * 1024 * 1024)).toFixed(1)}GB`;
+                } else if (size > 1024 * 1024) {
+                    return `${Math.floor(size / (1024 * 1024))}MB`;
+                } else if (size > 1024) {
+                    return `${Math.floor(size / 1024)}KB`;
+                } else {
+                    return `${size}B`;
+                }
+            } catch (e) {
+                return "0B";
             }
         }
 
@@ -720,10 +909,19 @@
             .then(response => response.json())
             .then(result => {
                 restoreButton(button);
+
+                console.log(`Download result for ${asin}:`, result);
+
                 if (result.success) {
-                    window.location.reload();
+                    // Download completed immediately (file exists)
+                    updateBookStatus(asin);
+                } else if (result.error && (result.error.includes('locked') || result.error.includes('not available'))) {
+                    // Book is locked
+                    markBookAsLocked(asin);
                 } else {
-                    alert(`Download failed: ${result.error}`);
+                    // Download started or failed in a way that's not related to locking
+                    // Start polling for progress anyway
+                    startProgressPolling(asin);
                 }
             })
             .catch(error => {
@@ -731,6 +929,57 @@
                 console.error('Error:', error);
                 alert('An unexpected error occurred.');
             });
+        }
+
+        function updateBookStatus(asin, result) {
+            // Fetch the updated book data from server without page reload
+            fetch(`/book-status/${asin}`)
+                .then(response => response.json())
+                .then(bookData => {
+                    // Update the UI with the new book data
+                    updateBookRow(asin, bookData);
+                })
+                .catch(error => {
+                    console.error('Error fetching updated book data:', error);
+                    // If we can't get updated data, just reload the page as fallback
+                    window.location.reload();
+                });
+        }
+
+        function markBookAsLocked(asin) {
+            const row = document.getElementById(`book-${asin}`);
+        
+            // Add lock icon to title cell
+            const titleCell = row.querySelector('td:nth-child(2)');
+            const titleDiv = titleCell.querySelector('.font-medium');
+        
+            // Only add if it doesn't already exist
+            if (!titleDiv.querySelector('.lock-icon')) {
+                const lockIcon = document.createElement('button');
+                lockIcon.className = 'inline-flex items-center text-yellow-500 hover:text-yellow-600';
+                lockIcon.title = 'Click to unlock';
+                lockIcon.setAttribute('onclick', `unlockBook('${asin}', event)`);
+                lockIcon.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>`;
+                titleDiv.appendChild(lockIcon);
+            }
+        
+            // Update the download button cell
+            const audioCell = row.querySelector('td:nth-child(4)');
+            const fileInfo = audioCell.querySelector('.file-info');
+        
+            // Replace content with "Purchase" button
+            fileInfo.innerHTML = `
+                <button class="btn btn-warning" onclick="window.open('https://www.audible.com/pd/${asin}', '_blank')">
+                    <svg class="w-4 h-4 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    Purchase
+                </button>
+            `;
         }
 
         function convertBook(asin) {
@@ -796,22 +1045,282 @@
 
             showLoading(button);
 
-            fetch(`/download-complete/${profile}`, {
+            // Store results for all operations
+            const allResults = {
+                books: null,
+                covers: null,
+                pdfs: null
+            };
+    
+            // Show the batch progress bar with initial message
+            document.getElementById('batch-progress').style.display = 'block';
+            document.getElementById('batch-progress-info').textContent = 'Starting comprehensive download...';
+            document.getElementById('batch-progress-count').textContent = 'Preparing to download books';
+    
+            // First start the book downloads
+            startBookDownloads(profile, button, allResults);
+        }
+
+        function startBookDownloads(profile, button, allResults) {
+            document.getElementById('batch-progress-info').textContent = 'Getting book list...';
+
+            // Start the book download process
+            fetch(`/download-all/${profile}`, {
                 method: 'POST'
             })
             .then(response => response.json())
             .then(result => {
-                restoreButton(button);
-                if (result.success) {
-                    window.location.reload();
-                } else {
-                    alert(`Failed to start downloads: ${result.error}`);
+                if (!result.success) {
+                    showError(button, `Failed to start book downloads: ${result.error}`);
+                    return;
                 }
+
+                // Store initial book result
+                allResults.books = {
+                    total: result.total || 0,
+                    downloaded: 0,
+                    failed: 0,
+                    locked_skipped: result.locked_count || 0
+                };
+
+                // If no books to download or just locked books, move on to covers
+                if (!result.asin_list || result.asin_list.length === 0) {
+                    document.getElementById('batch-progress-info').textContent = 'No new books to download.';
+
+                    // Move on to downloading covers
+                    setTimeout(() => {
+                        startCoverDownloads(profile, button, allResults);
+                    }, 1000);
+                    return;
+                }
+
+                // Start the batch processing
+                document.getElementById('batch-progress-info').textContent = 'Downloading books...';
+
+                processNextBook({
+                    profile: profile,
+                    asin_list: result.asin_list,
+                    current_index: 0,
+                    results: {
+                        total: result.asin_list.length,
+                        downloaded: 0,
+                        failed: 0,
+                        locked_skipped: result.locked_count || 0,
+                        failures: [],
+                        books: []
+                    },
+                    button: button,
+                    onComplete: (bookResults) => {
+                        // Store book results
+                        allResults.books = bookResults;
+
+                        // Move on to downloading covers
+                        document.getElementById('batch-progress-info').textContent = 'Books completed. Moving to covers...';
+                        setTimeout(() => {
+                            startCoverDownloads(profile, button, allResults);
+                        }, 1000);
+                    }
+                });
+            })
+            .catch(error => {
+                showError(button, `Error starting book downloads: ${error.message}`);
+            });
+        }
+
+        function downloadBooks(profile) {
+            const button = event.target.closest('button');
+            if (!confirm('Download all missing books for this profile?')) return;
+
+            showLoading(button);
+
+            // Start the download process
+            fetch(`/download-all/${profile}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (!result.success) {
+                    restoreButton(button);
+                    alert(`Failed to start downloads: ${result.error}`);
+                    return;
+                }
+
+                // If no books to download, just show a message
+                if (!result.asin_list || result.asin_list.length === 0) {
+                    restoreButton(button);
+                    let message = result.message || 'No books to download';
+                    if (result.locked_count && result.locked_count > 0) {
+                        message += `\n${result.locked_count} books are locked and were skipped.`;
+                    }
+                    alert(message);
+                    return;
+                }
+
+                // Show number of locked books in progress bar
+                const lockedCount = result.locked_count || 0;
+
+                // Start the batch processing
+                processNextBook({
+                    profile: profile,
+                    asin_list: result.asin_list,
+                    current_index: 0,
+                    results: {
+                        total: result.asin_list.length,
+                        downloaded: 0,
+                        failed: 0,
+                        locked_skipped: lockedCount,
+                        failures: [],
+                        books: []
+                    },
+                    button: button
+                });
             })
             .catch(error => {
                 restoreButton(button);
                 console.error('Error:', error);
                 alert('An unexpected error occurred.');
+            });
+        }
+
+        function processNextBook(state) {
+            // Update UI to show current progress
+            document.getElementById('batch-progress-info').textContent =
+                `Processing book ${state.current_index + 1} of ${state.results.total}`;
+
+            let countText = `Downloaded: ${state.results.downloaded} | Failed: ${state.results.failed}`;
+            if (state.results.locked_skipped > 0) {
+                countText += ` | Locked (skipped): ${state.results.locked_skipped}`;
+            }
+            document.getElementById('batch-progress-count').textContent = countText;
+
+            // Process the current book
+            fetch('/download-book-batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    profile: state.profile,
+                    asin_list: state.asin_list,
+                    current_index: state.current_index,
+                    results: state.results
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (!result.success) {
+                    if (state.onComplete) {
+                        state.onComplete(state.results);
+                    } else {
+                        restoreButton(state.button);
+                        alert(`Failed during batch processing: ${result.error}`);
+                    }
+                    return;
+                }
+
+                // Update state with the new results
+                state.results = result.results;
+
+                // Update the UI for the current book
+                if (result.current_book) {
+                    const bookInfo = result.current_book;
+                    const asin = bookInfo.asin;
+                    const row = document.getElementById(`book-${asin}`);
+
+                    if (row) {
+                        // Find the cell for the Audible file status
+                        const audioCell = row.querySelector('td:nth-child(4)');
+                        const fileInfo = audioCell.querySelector('.file-info');
+
+                        if (fileInfo) {
+                            if (bookInfo.status === 'downloaded') {
+                                fileInfo.innerHTML = `
+                                    <button class="btn btn-danger" onclick="confirmDelete('${asin}', 'audible')">
+                                        Delete
+                                    </button>
+                                    <span class="file-size">${formatFileSize(bookInfo.size || 0)}</span>
+                                `;
+                            } else if (bookInfo.locked) {
+                                fileInfo.innerHTML = `
+                                    <button class="btn btn-warning" onclick="window.open('https://www.audible.com/pd/${asin}', '_blank')">
+                                        <svg class="w-4 h-4 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                        </svg>
+                                        Purchase
+                                    </button>
+                                `;
+
+                                // Also update the title to show locked status
+                                const titleCell = row.querySelector('td:nth-child(2)');
+                                const titleDiv = titleCell.querySelector('.font-medium');
+
+                                // Add lock icon if it doesn't exist
+                                if (!titleDiv.querySelector('button[onclick*="unlockBook"]')) {
+                                    const lockIcon = document.createElement('button');
+                                    lockIcon.className = 'inline-flex items-center text-yellow-500 hover:text-yellow-600';
+                                    lockIcon.title = 'Click to unlock';
+                                    lockIcon.setAttribute('onclick', `unlockBook('${asin}', event)`);
+                                    lockIcon.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>`;
+                                    titleDiv.appendChild(lockIcon);
+                                }
+                            } else {
+                                // Failed but not locked
+                                fileInfo.innerHTML = `
+                                    <button class="btn btn-primary" onclick="pullBook('${state.profile}', '${asin}')">
+                                        Download
+                                    </button>
+                                    <div class="text-red-500 text-xs mt-1">Failed: ${bookInfo.error || 'Unknown error'}</div>
+                                `;
+                            }
+                        }
+                    }
+                }
+
+                // Update progress information
+                let countText = `Downloaded: ${state.results.downloaded} | Failed: ${state.results.failed}`;
+                if (state.results.locked_skipped > 0) {
+                    countText += ` | Locked (skipped): ${state.results.locked_skipped}`;
+                }
+                document.getElementById('batch-progress-count').textContent = countText;
+
+                // Check if we're done or should process the next book
+                if (result.complete) {
+                    if (state.onComplete) {
+                        state.onComplete(state.results);
+                    } else {
+                        restoreButton(state.button);
+                        let message = `Book download complete:\n` +
+                              `- ${state.results.downloaded} books downloaded\n` +
+                              `- ${state.results.failed} failed`;
+                      
+                        if (state.results.locked_skipped > 0) {
+                            message += `\n- ${state.results.locked_skipped} books were locked and skipped`;
+                        }
+
+                        alert(message);
+                    }
+                } else {
+                    // Update current index and process next book
+                    state.current_index = result.current_index;
+
+                    // Queue the next book with a small delay to allow UI to update
+                    setTimeout(() => {
+                        processNextBook(state);
+                    }, 100);
+                }
+            })
+            .catch(error => {
+                console.error('Error during batch processing:', error);
+                if (state.onComplete) {
+                    state.onComplete(state.results);
+                } else {
+                    restoreButton(state.button);
+                    alert('An error occurred during batch processing.');
+                }
             });
         }
 
@@ -875,6 +1384,127 @@
             });
         }
 
+        function startCoverDownloads(profile, button, allResults) {
+            document.getElementById('batch-progress-info').textContent = 'Getting missing covers list...';
+
+            // Start the cover download process
+            fetch(`/download-all-covers/${profile}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (!result.success) {
+                    showError(button, `Failed to start cover downloads: ${result.error}`);
+                    return;
+                }
+
+                // Store initial cover result
+                allResults.covers = {
+                    total: result.total || 0,
+                    downloaded: 0,
+                    failed: 0
+                };
+
+                // If no covers to download, move on to PDFs
+                if (!result.asin_list || result.asin_list.length === 0) {
+                    document.getElementById('batch-progress-info').textContent = 'No covers to download.';
+
+                    // Move on to downloading PDFs
+                    setTimeout(() => {
+                        startPDFDownloads(profile, button, allResults);
+                    }, 1000);
+                    return;
+                }
+
+                // Start the batch processing
+                document.getElementById('batch-progress-info').textContent = 'Downloading covers...';
+
+                processNextCover({
+                    profile: profile,
+                    asin_list: result.asin_list,
+                    current_index: 0,
+                    results: {
+                        total: result.asin_list.length,
+                        downloaded: 0,
+                        failed: 0,
+                        failures: [],
+                        books: []
+                    },
+                    button: button,
+                    onComplete: (coverResults) => {
+                        // Store cover results
+                        allResults.covers = coverResults;
+
+                        // Move on to downloading PDFs
+                        document.getElementById('batch-progress-info').textContent = 'Covers completed. Moving to PDFs...';
+                        setTimeout(() => {
+                            startPDFDownloads(profile, button, allResults);
+                        }, 1000);
+                    }
+                });
+            })
+            .catch(error => {
+                showError(button, `Error starting cover downloads: ${error.message}`);
+            });
+        }
+
+        function startPDFDownloads(profile, button, allResults) {
+            document.getElementById('batch-progress-info').textContent = 'Getting PDF list...';
+
+            // First, get all book ASINs that need PDF processing
+            fetch(`/list-missing-pdfs/${profile}`)
+                .then(response => response.json())
+                .then(result => {
+                    if (!result.success || result.books.length === 0) {
+                        document.getElementById('batch-progress-info').textContent = 'No PDFs to process.';
+
+                        // Complete the entire process
+                        completeAllDownloads(button, allResults);
+                        return;
+                    }
+
+                    // Get the list of ASINs
+                    const asinList = result.books.map(book => book.asin);
+
+                    // Store initial PDF result
+                    allResults.pdfs = {
+                        total: asinList.length,
+                        downloaded: 0,
+                        not_available: 0,
+                        failed: 0
+                    };
+
+                    // Start the batch processing
+                    document.getElementById('batch-progress-info').textContent = 'Processing PDFs...';
+
+                    // Start the batch processing with the shared progress bar
+                    processNextPDF({
+                        profile: profile,
+                        asin_list: asinList,
+                        current_index: 0,
+                        results: {
+                            total: result.books.length,
+                            downloaded: 0,
+                            not_available: 0,
+                            failed: 0,
+                            failures: [],
+                            books: []
+                        },
+                        button: button,
+                        onComplete: (pdfResults) => {
+                            // Store PDF results
+                            allResults.pdfs = pdfResults;
+
+                            // Complete the entire process
+                            completeAllDownloads(button, allResults);
+                        }
+                    });
+                })
+                .catch(error => {
+                    showError(button, `Error starting PDF downloads: ${error.message}`);
+                });
+        }
+
         function downloadPDF(profile, asin) {
             const row = document.getElementById(`book-${asin}`);
             const button = row.querySelector('[onclick*="downloadPDF"]');
@@ -889,7 +1519,15 @@
                 if (result.success) {
                     window.location.reload();
                 } else {
-                    alert(`Failed to download PDF: ${result.error}`);
+                    // Check if the error indicates PDF is not available
+                    if (result.error && result.error.includes('No PDF available')) {
+                        // Update the UI to show N/A without reloading
+                        const pdfCell = row.querySelector('td:nth-child(6)');
+                        const pdfInfo = pdfCell.querySelector('.file-info');
+                        pdfInfo.innerHTML = `<span class="na-badge">N/A</span>`;
+                    } else {
+                        alert(`Failed to download PDF: ${result.error}`);
+                    }
                 }
             })
             .catch(error => {
@@ -905,22 +1543,146 @@
 
             showLoading(button);
 
+            // Start the download process
             fetch(`/download-all-covers/${profile}`, {
                 method: 'POST'
             })
             .then(response => response.json())
             .then(result => {
-                restoreButton(button);
-                if (result.success) {
-                    window.location.reload();
-                } else {
-                    alert(`Failed to download covers: ${result.error}`);
+                if (!result.success) {
+                    restoreButton(button);
+                    alert(`Failed to start downloads: ${result.error}`);
+                    return;
                 }
+
+                // If no covers to download, just show a message
+                if (!result.asin_list || result.asin_list.length === 0) {
+                    restoreButton(button);
+                    alert(result.message || 'No covers to download');
+                    return;
+                }
+
+                // Start the batch processing
+                processNextCover({
+                    profile: profile,
+                    asin_list: result.asin_list,
+                    current_index: 0,
+                    results: {
+                        total: result.asin_list.length,
+                        downloaded: 0,
+                        failed: 0,
+                        failures: [],
+                        books: []
+                    },
+                    button: button
+                });
             })
             .catch(error => {
                 restoreButton(button);
                 console.error('Error:', error);
                 alert('An unexpected error occurred.');
+            });
+        }
+
+        function processNextCover(state) {
+            // Update UI to show current progress
+            document.getElementById('batch-progress-info').textContent =
+                `Downloading cover ${state.current_index + 1} of ${state.results.total}`;
+
+            document.getElementById('batch-progress-count').textContent =
+                `Downloaded: ${state.results.downloaded} | Failed: ${state.results.failed}`;
+
+            // Process the current cover
+            fetch('/download-cover-batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    profile: state.profile,
+                    asin_list: state.asin_list,
+                    current_index: state.current_index,
+                    results: state.results
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (!result.success) {
+                    if (state.onComplete) {
+                        state.onComplete(state.results);
+                    } else {
+                        restoreButton(state.button);
+                        alert(`Failed during batch processing: ${result.error}`);
+                    }
+                    return;
+                }
+
+                // Update state with the new results
+                state.results = result.results;
+
+                // Update the UI for the current book
+                if (result.current_book) {
+                    const bookInfo = result.current_book;
+                    const asin = bookInfo.asin;
+                    const row = document.getElementById(`book-${asin}`);
+
+                    if (row) {
+                        // Find the cell for the cover
+                        const coverCell = row.querySelector('td:nth-child(1)');
+
+                        if (coverCell) {
+                            if (bookInfo.status === 'downloaded' && bookInfo.cover_path) {
+                                coverCell.innerHTML = `
+                                    <img src="/cover/${asin}"
+                                         class="cover-image"
+                                         alt="${bookInfo.title} cover"
+                                         onclick="showCover('/cover/${asin}')"
+                                    >
+                                `;
+                            } else {
+                                // Failed cover download
+                                coverCell.innerHTML = `
+                                    <button class="btn btn-primary" onclick="downloadCover('${state.profile}', '${asin}')">
+                                        Pull
+                                    </button>
+                                `;
+                            }
+                        }
+                    }
+                }
+
+                // Update progress information
+                document.getElementById('batch-progress-count').textContent =
+                    `Downloaded: ${state.results.downloaded} | Failed: ${state.results.failed}`;
+
+                // Check if we're done or should process the next cover
+                if (result.complete) {
+                    if (state.onComplete) {
+                        state.onComplete(state.results);
+                    } else {
+                        restoreButton(state.button);
+                        alert(`Cover download complete:\n` +
+                              `- ${state.results.downloaded} covers downloaded\n` +
+                              `- ${state.results.failed} failed`);
+                    }
+                } else {
+                    // Update current index and process next cover
+                    state.current_index = result.current_index;
+
+                    // Queue the next cover with a small delay to allow UI to update
+                    setTimeout(() => {
+                        processNextCover(state);
+                    }, 100);
+                }
+            })
+            .catch(error => {
+                console.error('Error during batch processing:', error);
+                if (state.onComplete) {
+                    state.onComplete(state.results);
+                } else {
+                    restoreButton(state.button);
+                    alert('An error occurred during batch processing.');
+                }
             });
         }
 
@@ -930,26 +1692,138 @@
 
             showLoading(button);
 
+            // Start the conversion process
             fetch(`/convert-all/${profile}`, {
                 method: 'POST'
             })
             .then(response => response.json())
             .then(result => {
-                restoreButton(button);
-                if (result.success) {
-                    const message = `Conversion complete:\n` +
-                                  `${result.converted} books converted\n` +
-                                  `${result.failed} failed`;
-                    alert(message);
-                    window.location.reload();
-                } else {
+                if (!result.success) {
+                    restoreButton(button);
                     alert(`Failed to start conversions: ${result.error}`);
+                    return;
                 }
+
+                // If no books to convert, just show a message
+                if (!result.asin_list || result.asin_list.length === 0) {
+                    restoreButton(button);
+                    alert(result.message || 'No books to convert');
+                    return;
+                }
+
+                // Start the batch processing
+                processNextConversion({
+                    asin_list: result.asin_list,
+                    current_index: 0,
+                    results: {
+                        total: result.asin_list.length,
+                        converted: 0,
+                        failed: 0,
+                        failures: [],
+                        books: []
+                    },
+                    button: button
+                });
             })
             .catch(error => {
                 restoreButton(button);
                 console.error('Error:', error);
                 alert('An unexpected error occurred.');
+            });
+        }
+
+        function processNextConversion(state) {
+            // Update UI to show current progress
+            document.getElementById('batch-progress-info').textContent =
+                `Converting book ${state.current_index + 1} of ${state.results.total}`;
+
+            document.getElementById('batch-progress-count').textContent =
+                `Converted: ${state.results.converted} | Failed: ${state.results.failed}`;
+
+            // Process the current book
+            fetch('/convert-book-batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    asin_list: state.asin_list,
+                    current_index: state.current_index,
+                    results: state.results
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (!result.success) {
+                    restoreButton(state.button);
+                    alert(`Failed during batch processing: ${result.error}`);
+                    return;
+                }
+
+                // Update state with the new results
+                state.results = result.results;
+
+                // Update the UI for the current book
+                if (result.current_book) {
+                    const bookInfo = result.current_book;
+                    const asin = bookInfo.asin;
+                    const row = document.getElementById(`book-${asin}`);
+
+                    if (row) {
+                        // Find the cell for the M4B file status
+                        const m4bCell = row.querySelector('td:nth-child(5)');
+                        const fileInfo = m4bCell.querySelector('.file-info');
+
+                        if (fileInfo) {
+                            if (bookInfo.status === 'converted') {
+                                fileInfo.innerHTML = `
+                                    <div class="btn-group">
+                                        <button class="btn btn-primary" onclick="downloadFile('${bookInfo.file}')">
+                                            Download
+                                        </button>
+                                        <button class="btn btn-danger" onclick="confirmDelete('${asin}', 'm4b')">
+                                            Delete
+                                        </button>
+                                    </div>
+                                    <span class="file-size">${formatFileSize(bookInfo.size || 0)}</span>
+                                `;
+                            } else {
+                                // Failed conversion
+                                fileInfo.innerHTML = `
+                                    <button class="btn btn-success" onclick="convertBook('${asin}')">
+                                        Convert
+                                    </button>
+                                    <div class="text-red-500 text-xs mt-1">Failed: ${bookInfo.error || 'Unknown error'}</div>
+                                `;
+                            }
+                        }
+                    }
+                }
+
+                // Update progress information
+                document.getElementById('batch-progress-count').textContent =
+                    `Converted: ${state.results.converted} | Failed: ${state.results.failed}`;
+
+                // Check if we're done or should process the next conversion
+                if (result.complete) {
+                    restoreButton(state.button);
+                    alert(`Conversion complete:\n` +
+                          `- ${state.results.converted} books converted\n` +
+                          `- ${state.results.failed} failed`);
+                } else {
+                    // Update current index and process next book
+                    state.current_index = result.current_index;
+
+                    // Queue the next book with a small delay to allow UI to update
+                    setTimeout(() => {
+                        processNextConversion(state);
+                    }, 100);
+                }
+            })
+            .catch(error => {
+                restoreButton(state.button);
+                console.error('Error during batch processing:', error);
+                alert('An error occurred during batch processing.');
             });
         }
 
@@ -959,23 +1833,299 @@
 
             showLoading(button);
 
-            fetch(`/download-all-pdfs/${profile}`, {
+            // First, get all book ASINs that need PDF processing
+            fetch(`/list-missing-pdfs/${profile}`)
+                .then(response => response.json())
+                .then(result => {
+                    if (!result.success || result.books.length === 0) {
+                        restoreButton(button);
+                        alert(result.message || 'No PDFs to process');
+                        return;
+                    }
+
+                    // Get the list of ASINs
+                    const asinList = result.books.map(book => book.asin);
+
+                    // Start the batch processing with the shared progress bar
+                    processNextPDF({
+                        profile: profile,
+                        asin_list: asinList,
+                        current_index: 0,
+                        results: {
+                            total: result.books.length,
+                            downloaded: 0,
+                            not_available: 0,
+                            failed: 0,
+                            failures: [],
+                            books: []
+                        },
+                        button: button
+                    });
+                })
+                .catch(error => {
+                    restoreButton(button);
+                    console.error('Error:', error);
+                    alert('An unexpected error occurred.');
+                });
+        }
+
+        function processNextPDF(state) {
+            // If all books processed, trigger completion callback
+            if (state.current_index >= state.asin_list.length) {
+                if (state.onComplete) {
+                    state.onComplete(state.results);
+                } else {
+                    restoreButton(state.button);
+                    alert(`PDF processing complete:\n` +
+                          `- ${state.results.downloaded} PDFs downloaded\n` +
+                          `- ${state.results.not_available} PDFs not available\n` +
+                          `- ${state.results.failed} failed`);
+                }
+                return;
+            }
+
+            // Update the shared batch progress bar
+            document.getElementById('batch-progress-info').textContent =
+                `Processing PDF ${state.current_index + 1} of ${state.results.total}`;
+
+            let countText = `Downloaded: ${state.results.downloaded} | Not Available: ${state.results.not_available} | Failed: ${state.results.failed}`;
+            document.getElementById('batch-progress-count').textContent = countText;
+
+            const asin = state.asin_list[state.current_index];
+
+            // Get the row to update
+            const row = document.getElementById(`book-${asin}`);
+
+            // Get the book title for better logging
+            let book_title = "Unknown";
+            if (row) {
+                const titleCell = row.querySelector('td:nth-child(2)');
+                if (titleCell) {
+                    const titleDiv = titleCell.querySelector('.font-medium');
+                    if (titleDiv) {
+                        book_title = titleDiv.textContent.trim();
+                    }
+                }
+            }
+
+            if (!row) {
+                // Skip if row not found, move to next book
+                state.current_index++;
+                processNextPDF(state);
+                return;
+            }
+
+            // Find the PDF cell and update it to show "Processing..."
+            const pdfCell = row.querySelector('td:nth-child(6)');
+            const pdfInfo = pdfCell.querySelector('.file-info');
+            if (pdfInfo) {
+                pdfInfo.innerHTML = `
+                    <div class="flex items-center">
+                        <span class="loading mr-2"></span>
+                        <span>Processing...</span>
+                    </div>
+                `;
+            }
+
+            // Process this book
+            fetch(`/download-pdf/${state.profile}/${asin}`, {
                 method: 'POST'
             })
             .then(response => response.json())
             .then(result => {
-                restoreButton(button);
                 if (result.success) {
-                    window.location.reload();
+                    // PDF downloaded successfully
+                    state.results.downloaded++;
+
+                    // Make an additional request to get updated book info with file size
+                    fetch(`/book-status/${asin}`)
+                        .then(response => response.json())
+                        .then(bookData => {
+                            if (pdfInfo && bookData.pdf_file) {
+                                pdfInfo.innerHTML = `
+                                    <button class="btn btn-primary" onclick="window.location.href='/pdf/${asin}'">
+                                        Download
+                                    </button>
+                                    <span class="file-size">${formatFileSize(bookData.pdf_size || 0)}</span>
+                                `;
+                            }
+
+                            // Add to results
+                            state.results.books.push({
+                                asin: asin,
+                                title: book_title,
+                                status: 'downloaded',
+                                size: bookData.pdf_size || 0
+                            });
+
+                            // Move to next book
+                            state.current_index++;
+                            processNextPDF(state);
+                        })
+                        .catch(error => {
+                            console.error('Error fetching book data:', error);
+
+                            // Still update the UI with basic info
+                            if (pdfInfo) {
+                                pdfInfo.innerHTML = `
+                                    <button class="btn btn-primary" onclick="window.location.href='/pdf/${asin}'">
+                                        Download
+                                    </button>
+                                    <span class="file-size">Size unknown</span>
+                                `;
+                            }
+
+                            // Add to results
+                            state.results.books.push({
+                                asin: asin,
+                                title: book_title,
+                                status: 'downloaded'
+                            });
+
+                            // Continue with next book
+                            state.current_index++;
+                            processNextPDF(state);
+                        });
+                } else if (result.error && result.error.includes('No PDF available')) {
+                    // PDF not available
+                    state.results.not_available++;
+                    if (pdfInfo) {
+                        pdfInfo.innerHTML = `<span class="na-badge">N/A</span>`;
+                    }
+
+                    // Add to results
+                    state.results.books.push({
+                        asin: asin,
+                        title: book_title,
+                        status: 'not_available'
+                    });
+
+                    // Move to next book
+                    state.current_index++;
+                    processNextPDF(state);
                 } else {
-                    alert(`Failed to download PDFs: ${result.error}`);
+                    // Download failed
+                    state.results.failed++;
+                    if (pdfInfo) {
+                        pdfInfo.innerHTML = `
+                            <button class="btn btn-primary" onclick="downloadPDF('${state.profile}', '${asin}')">
+                                Pull PDF
+                            </button>
+                            <div class="text-red-500 text-xs mt-1">Failed: ${result.error}</div>
+                        `;
+                    }
+
+                    // Add to results
+                    state.results.books.push({
+                        asin: asin,
+                        title: book_title,
+                        status: 'failed',
+                        error: result.error
+                    });
+
+                    state.results.failures.push({
+                        asin: asin,
+                        title: book_title,
+                        error: result.error || 'Unknown error'
+                    });
+
+                    // Move to next book
+                    state.current_index++;
+                    processNextPDF(state);
                 }
             })
             .catch(error => {
-                restoreButton(button);
                 console.error('Error:', error);
-                alert('An unexpected error occurred.');
+                state.results.failed++;
+
+                if (pdfInfo) {
+                    pdfInfo.innerHTML = `
+                        <button class="btn btn-primary" onclick="downloadPDF('${state.profile}', '${asin}')">
+                            Pull PDF
+                        </button>
+                        <div class="text-red-500 text-xs mt-1">Error: ${error.message}</div>
+                    `;
+                }
+
+                // Add to results
+                state.results.books.push({
+                    asin: asin,
+                    title: book_title,
+                    status: 'failed',
+                    error: error.message
+                });
+
+                state.results.failures.push({
+                    asin: asin,
+                    title: book_title,
+                    error: error.message
+                });
+
+                // Continue with next book despite error
+                state.current_index++;
+                processNextPDF(state);
             });
+        }
+
+        function updateBookPDFStatus(asin, bookData) {
+            const row = document.getElementById(`book-${asin}`);
+            if (!row) return;
+    
+            const pdfCell = row.querySelector('td:nth-child(6)');
+            const pdfInfo = pdfCell.querySelector('.file-info');
+    
+            if (bookData.pdf_file) {
+                // PDF was downloaded successfully
+                pdfInfo.innerHTML = `
+                    <button class="btn btn-primary" onclick="window.location.href='/pdf/${asin}'">
+                        Download
+                    </button>
+                    <span class="file-size">${formatFileSize(bookData.pdf_size)}</span>
+                `;
+            } else if (bookData.pdf_available === false) {
+                // PDF is not available
+                pdfInfo.innerHTML = `<span class="na-badge">N/A</span>`;
+            }
+        }
+
+        function completeAllDownloads(button, allResults) {
+            document.getElementById('batch-progress-info').textContent = 'All operations completed!';
+
+            // Create a summary of all operations
+            let summary = 'Download operations complete:\n\n';
+
+            summary += 'Books:\n';
+            if (allResults.books) {
+                summary += `- ${allResults.books.downloaded} downloaded\n`;
+                summary += `- ${allResults.books.failed} failed\n`;
+                if (allResults.books.locked_skipped > 0) {
+                    summary += `- ${allResults.books.locked_skipped} locked (skipped)\n`;
+                }
+            } else {
+                summary += '- No book operations performed\n';
+            }
+
+            summary += '\nCovers:\n';
+            if (allResults.covers) {
+                summary += `- ${allResults.covers.downloaded} downloaded\n`;
+                summary += `- ${allResults.covers.failed} failed\n`;
+            } else {
+                summary += '- No cover operations performed\n';
+            }
+
+            summary += '\nPDFs:\n';
+            if (allResults.pdfs) {
+                summary += `- ${allResults.pdfs.downloaded} downloaded\n`;
+                if (allResults.pdfs.not_available > 0) {
+                    summary += `- ${allResults.pdfs.not_available} not available\n`;
+                }
+                summary += `- ${allResults.pdfs.failed} failed\n`;
+            } else {
+                summary += '- No PDF operations performed\n';
+            }
+
+            restoreButton(button);
+            alert(summary);
         }
 
         function unlockBook(asin, event) {
@@ -1007,6 +2157,120 @@
                 alert('An error occurred while unlocking the book.');
             });
         }
+
+        // State management functions
+        function saveState() {
+            const activeProfiles = [];
+            document.querySelectorAll('.profile-content.active').forEach(el => {
+                const id = el.id;
+                if (id && id.startsWith('profile-')) {
+                    activeProfiles.push(id.substring(8)); // Remove 'profile-' prefix
+                }
+            });
+        
+            if (activeProfiles.length > 0) {
+                localStorage.setItem('activeProfiles', JSON.stringify(activeProfiles));
+            }
+        }
+
+        function restoreState() {
+            try {
+                const activeProfiles = JSON.parse(localStorage.getItem('activeProfiles') || '[]');
+                activeProfiles.forEach(profile => {
+                    const profileContent = document.getElementById(`profile-${profile}`);
+                    if (profileContent) {
+                        profileContent.classList.add('active');
+                    }
+                });
+            } catch (e) {
+                console.error('Error restoring state:', e);
+            }
+        }
+
+        function startProgressPolling(asin) {
+            // Create a progress indicator
+            const row = document.getElementById(`book-${asin}`);
+            const audioCell = row.querySelector('td:nth-child(4)');
+            const fileInfo = audioCell.querySelector('.file-info');
+
+            // Remove any existing download buttons
+            const existingButton = fileInfo.querySelector('button');
+            if (existingButton) {
+                existingButton.remove();
+            }
+
+            // Add progress element if it doesn't exist
+            let progressDiv = row.querySelector('.download-progress');
+            if (!progressDiv) {
+                progressDiv = document.createElement('div');
+                progressDiv.className = 'download-progress';
+                progressDiv.innerHTML = `
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" style="width:0%"></div>
+                    </div>
+                    <div class="progress-text">Starting download...</div>
+                `;
+                fileInfo.appendChild(progressDiv);
+            }
+
+            // Store the interval ID so we can cancel it if needed
+            if (window[`progress_interval_${asin}`]) {
+                clearInterval(window[`progress_interval_${asin}`]);
+            }
+
+            // Start polling for progress
+            const progressInterval = setInterval(() => {
+                fetch(`/download-status/${asin}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log(`Progress update for ${asin}:`, data);
+
+                        const progressElement = row.querySelector('.download-progress');
+                        if (!progressElement) return;
+
+                        if (data.complete) {
+                            clearInterval(progressInterval);
+                            // Trigger UI update with new data
+                            updateBookStatus(asin, {success: true});
+                        } else if (data.error) {
+                            clearInterval(progressInterval);
+                            progressElement.innerHTML = `<div class="error">${data.error}</div>`;
+
+                            // Check if book is locked
+                            if (data.status === 'locked') {
+                                markBookAsLocked(asin);
+                            }
+                        } else if (data.progress) {
+                            const fill = row.querySelector('.progress-bar-fill');
+                            const text = row.querySelector('.progress-text');
+                            if (fill && text) {
+                                fill.style.width = `${data.progress}%`;
+                                text.textContent = `Downloading: ${data.progress}%`;
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching download status:', error);
+                    });
+            }, 1000);
+
+            // Store the interval ID
+            window[`progress_interval_${asin}`] = progressInterval;
+        }
+
+        function showError(button, message) {
+            restoreButton(button);
+            alert(message);
+        }
+
+        function testSyntax() {
+            console.log("Syntax is valid");
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            restoreState();
+        });
     </script>
 
 </body>

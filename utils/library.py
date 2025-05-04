@@ -131,6 +131,7 @@ def verify_files():
     audible_verified = 0
     m4b_verified = 0
     missing_files = []
+    vouchers_added = 0
     
     for asin, book in library.items():
         book_title = book.get('amazon_title', 'Unknown')
@@ -151,6 +152,16 @@ def verify_files():
                     book['audible_size'] = current_size
                     changes = True
                 audible_verified += 1
+
+                # Check for AAXC files missing voucher links
+                if path.suffix == '.aaxc' and not book.get('voucher_file'):
+                    # Look for matching voucher file
+                    voucher_path = path.with_suffix('.voucher')
+                    if voucher_path.exists():
+                        book['voucher_file'] = str(voucher_path)
+                        config.logger.info(f"Added missing voucher file link for '{book_title}': {voucher_path}")
+                        vouchers_added += 1
+                        changes = True
                     
         # Check M4B file
         if book.get('m4b_file'):
@@ -176,6 +187,7 @@ def verify_files():
         f"- Verified {audible_verified} Audible files\n"
         f"- Verified {m4b_verified} M4B files\n"
         f"- Found {len(missing_files)} missing files"
+        f"- Added {vouchers_added} missing voucher file links"
     )
     if missing_files:
         config.logger.info("Missing files:\n" + "\n".join(missing_files))

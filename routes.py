@@ -3,10 +3,8 @@ from app import app
 import config
 from utils.auth import get_profiles, handle_quickstart, handle_additional_profile
 from utils.library import load_library, save_library, verify_files, update_book_database
-from utils.files import (
-    download_content, convert_book, get_file_status,
-    download_status, conversion_status, DownloadType
-)
+from utils.files import download_content, get_file_status, download_status, DownloadType
+from utils.converter import convert_book
 import os
 import subprocess
 from utils.common import run_command
@@ -31,6 +29,15 @@ def index():
 def get_process_file():
     """Get path to auth process file"""
     return os.path.join(config.CONFIG_DIR, '.auth_process')
+
+@app.route('/book-status/<asin>')
+def book_status(asin):
+    """Get current status of a book"""
+    library = load_library()
+    if asin in library:
+        return jsonify(library[asin])
+    else:
+        return jsonify({'error': 'Book not found'}), 404
 
 @app.route('/init', methods=['POST'])
 def init_profile():
@@ -167,6 +174,8 @@ def add_profile():
 @app.route('/library')
 def view_library():
     """View library and manage books"""
+    from utils.converter import conversion_status
+
     library = load_library()
     profiles = get_profiles()
 
@@ -355,6 +364,48 @@ def download_route(profile, asin):
 
     return jsonify(download_content(profile, asin, DownloadType.BOOK, options))
 
+@app.route('/download-status/<asin>')
+def download_status_route(asin):
+    """Get status of a download in progress"""
+    # Check if book exists in library
+    library = load_library()
+    if asin not in library:
+        return jsonify({
+            'error': 'Book not found',
+            'complete': False
+        })
+    
+    # Check if book is already downloaded
+    if library[asin].get('audible_file'):
+        return jsonify({
+            'complete': True,
+            'success': True
+        })
+    
+    # Check if book is locked
+    if library[asin].get('locked'):
+        return jsonify({
+            'error': 'Book is locked or not available',
+            'status': 'locked',
+            'complete': True
+        })
+    
+    # Get progress from download_status global
+    status_info = download_status.get(asin, {})
+    
+    # If progress exists, return it
+    if isinstance(status_info, dict) and 'progress' in status_info:
+        return jsonify({
+            'progress': status_info['progress'],
+            'complete': False
+        })
+    
+    # Default response for books with unknown status
+    return jsonify({
+        'progress': 0,
+        'complete': False
+    })
+
 @app.route('/convert/<asin>', methods=['POST'])
 def convert_route(asin):
     """Handle book conversion request"""
@@ -378,43 +429,140 @@ def download_all(profile):
                 'error': f'Profile {profile} not found'
             })
 
-        # Get books missing Audible files
+        # Get books missing Audible files and not locked
         to_download = [
-            asin for asin, book in library.items()
-            if profile in book.get('profiles', []) and not book.get('audible_file')
+            {
+                'asin': asin,
+                'title': book.get('amazon_title', 'Unknown')
+            }
+            for asin, book in library.items()
+            if profile in book.get('profiles', []) 
+            and not book.get('audible_file')
+            and not book.get('locked', False)  # Skip already locked books
+        ]
+        
+        # Count locked books
+        locked_books = [
+            {
+                'asin': asin,
+                'title': book.get('amazon_title', 'Unknown')
+            }
+            for asin, book in library.items()
+            if profile in book.get('profiles', []) 
+            and not book.get('audible_file')
+            and book.get('locked', False)  # Count locked books
         ]
 
-        if not to_download:
+        if not to_download and not locked_books:
             return jsonify({
                 'success': True,
                 'message': 'No new books to download'
             })
 
-        results = {
+        # Return initial response to start the process
+        return jsonify({
             'success': True,
             'total': len(to_download),
-            'downloaded': 0,
-            'failed': 0,
-            'failures': []
-        }
-
-        for asin in to_download:
-            result = download_content(profile, asin, DownloadType.BOOK)
-            if result['success']:
-                results['downloaded'] += 1
-            else:
-                results['failed'] += 1
-                book = library.get(asin, {})
-                results['failures'].append({
-                    'asin': asin,
-                    'title': book.get('amazon_title', 'Unknown'),
-                    'error': result.get('error', 'Unknown error')
-                })
-
-        return jsonify(results)
+            'locked_count': len(locked_books),
+            'asin_list': [book['asin'] for book in to_download],
+            'message': f'Starting download of {len(to_download)} books. Skipping {len(locked_books)} locked books.'
+        })
 
     except Exception as e:
         config.logger.error(f"Batch download failed: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/download-book-batch', methods=['POST'])
+def download_book_batch():
+    """Process a batch of books one by one with status updates"""
+    try:
+        data = request.get_json()
+        profile = data.get('profile')
+        asin_list = data.get('asin_list', [])
+        current_index = data.get('current_index', 0)
+        results = data.get('results', {
+            'total': len(asin_list),
+            'downloaded': 0,
+            'failed': 0,
+            'failures': [],
+            'books': []
+        })
+        
+        # If all books processed, return final results
+        if current_index >= len(asin_list):
+            return jsonify({
+                'success': True,
+                'complete': True,
+                'results': results
+            })
+            
+        # Process the current book
+        asin = asin_list[current_index]
+        
+        # Get the book title for better logging
+        library = load_library()
+        book_title = library.get(asin, {}).get('amazon_title', 'Unknown')
+        
+        config.logger.info(f"Batch processing book {current_index+1}/{len(asin_list)}: {book_title} ({asin})")
+        
+        # Use the existing download_content function
+        result = download_content(profile, asin, DownloadType.BOOK)
+        
+        book_info = {
+            'asin': asin,
+            'title': book_title,
+            'index': current_index
+        }
+
+        # Reload library to get updated file sizes
+        updated_library = load_library()
+        
+        if result['success']:
+            results['downloaded'] += 1
+            book_info['status'] = 'downloaded'
+            book_info['file'] = result.get('file', '')
+
+            # Get updated file size from library
+            if asin in updated_library and updated_library[asin].get('audible_size'):
+                book_info['size'] = updated_library[asin]['audible_size']
+            else:
+                # If size not in library, try to get it from the file
+                if result.get('file') and os.path.exists(result['file']):
+                    book_info['size'] = os.path.getsize(result['file'])
+                else:
+                    book_info['size'] = 0
+        else:
+            results['failed'] += 1
+            book_info['status'] = 'failed'
+            book_info['error'] = result.get('error', 'Unknown error')
+            
+            if result.get('status') == 'locked' or 'locked' in result.get('error', '').lower():
+                book_info['locked'] = True
+                
+            results['failures'].append({
+                'asin': asin,
+                'title': book_title,
+                'error': result.get('error', 'Unknown error')
+            })
+            
+        results['books'].append(book_info)
+        
+        # Return progress update
+        return jsonify({
+            'success': True,
+            'complete': False,
+            'current_index': current_index + 1,
+            'profile': profile,
+            'asin_list': asin_list,
+            'current_book': book_info,
+            'results': results
+        })
+        
+    except Exception as e:
+        config.logger.error(f"Book batch processing failed: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
@@ -426,34 +574,115 @@ def download_all_covers(profile):
     try:
         library = load_library()
         to_download = [
-            asin for asin, book in library.items()
+            {
+                'asin': asin,
+                'title': book.get('amazon_title', 'Unknown')
+            }
+            for asin, book in library.items()
             if profile in book.get('profiles', []) and not book.get('cover_path')
         ]
 
-        results = {
+        if not to_download:
+            return jsonify({
+                'success': True,
+                'message': 'No covers to download'
+            })
+
+        # Return initial response to start the process
+        return jsonify({
             'success': True,
             'total': len(to_download),
-            'downloaded': 0,
-            'failed': 0,
-            'failures': []
-        }
-
-        for asin in to_download:
-            result = download_content(profile, asin, DownloadType.COVER)
-            if result['success']:
-                results['downloaded'] += 1
-            else:
-                results['failed'] += 1
-                results['failures'].append({
-                    'asin': asin,
-                    'error': result.get('error', 'Unknown error')
-                })
-
-        return jsonify(results)
+            'asin_list': [book['asin'] for book in to_download],
+            'message': f'Starting download of {len(to_download)} covers'
+        })
 
     except Exception as e:
         config.logger.error(f"Bulk cover download failed: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/download-cover-batch', methods=['POST'])
+def download_cover_batch():
+    """Process a batch of cover downloads one by one with status updates"""
+    try:
+        data = request.get_json()
+        profile = data.get('profile')
+        asin_list = data.get('asin_list', [])
+        current_index = data.get('current_index', 0)
+        results = data.get('results', {
+            'total': len(asin_list),
+            'downloaded': 0,
+            'failed': 0,
+            'failures': [],
+            'books': []
+        })
+        
+        # If all covers processed, return final results
+        if current_index >= len(asin_list):
+            return jsonify({
+                'success': True,
+                'complete': True,
+                'results': results
+            })
+            
+        # Process the current cover
+        asin = asin_list[current_index]
+        
+        # Get the book title for better logging
+        library = load_library()
+        book_title = library.get(asin, {}).get('amazon_title', 'Unknown')
+        
+        config.logger.info(f"Batch cover download {current_index+1}/{len(asin_list)}: {book_title} ({asin})")
+        
+        # Use the existing download_content function with DownloadType.COVER
+        result = download_content(profile, asin, DownloadType.COVER)
+        
+        book_info = {
+            'asin': asin,
+            'title': book_title,
+            'index': current_index
+        }
+        
+        # Reload library to get updated file path
+        updated_library = load_library()
+        
+        if result['success']:
+            results['downloaded'] += 1
+            book_info['status'] = 'downloaded'
+            book_info['file'] = result.get('file', '')
+            
+            # Get path from updated library
+            if asin in updated_library and updated_library[asin].get('cover_path'):
+                book_info['cover_path'] = updated_library[asin]['cover_path']
+        else:
+            results['failed'] += 1
+            book_info['status'] = 'failed'
+            book_info['error'] = result.get('error', 'Unknown error')
+            
+            results['failures'].append({
+                'asin': asin,
+                'title': book_title,
+                'error': result.get('error', 'Unknown error')
+            })
+            
+        results['books'].append(book_info)
+        
+        # Return progress update
+        return jsonify({
+            'success': True,
+            'complete': False,
+            'current_index': current_index + 1,
+            'profile': profile,
+            'asin_list': asin_list,
+            'current_book': book_info,
+            'results': results
+        })
+        
+    except Exception as e:
+        config.logger.error(f"Cover batch processing failed: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 @app.route('/download-pdf/<profile>/<asin>', methods=['POST'])
 def download_pdf_route(profile, asin):
@@ -474,6 +703,12 @@ def download_pdf_route(profile, asin):
             'error': result.get('error', 'Unknown error during PDF download')
         })
     
+    # Get the file size from the library for successful downloads
+    library = load_library()
+    pdf_size = 0
+    if asin in library and library[asin].get('pdf_size'):
+        pdf_size = library[asin]['pdf_size']
+
     # For successful downloads
     return jsonify({
         'success': True,
@@ -500,28 +735,67 @@ def download_all_pdfs(profile):
             'downloaded': 0,
             'not_available': 0,
             'failed': 0,
-            'failures': []
+            'failures': [],
+            'books': []
         }
 
         for asin in to_download:
             result = download_content(profile, asin, DownloadType.PDF)
+            book_info = {
+                'asin': asin,
+                'title': library[asin].get('amazon_title', 'Unknown')
+            }
+
             if result['success']:
                 results['downloaded'] += 1
-            elif result.get('message') == 'No PDF available for this book':
+                book_info['pdf_file'] = result.get('file')
+                book_info['pdf_size'] = library[asin].get('pdf_size', 0)
+            elif result.get('message') == 'No PDF available for this book' or 'No PDF found' in result.get('error', ''):
                 results['not_available'] += 1
+                book_info['pdf_available'] = False
             else:
                 results['failed'] += 1
-                book = library.get(asin, {})
+                book_info['error'] = result.get('error', 'Unknown error')
                 results['failures'].append({
                     'asin': asin,
-                    'title': book.get('amazon_title', 'Unknown'),
+                    'title': library[asin].get('amazon_title', 'Unknown'),
                     'error': result.get('error', 'Unknown error')
                 })
+            
+            results['books'].append(book_info)
 
         return jsonify(results)
 
     except Exception as e:
         config.logger.error(f"Bulk PDF download failed: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/list-missing-pdfs/<profile>')
+def list_missing_pdfs(profile):
+    """Get list of books that need PDF processing"""
+    try:
+        library = load_library()
+        
+        # Get books that don't have PDF status set or don't have the file
+        books_to_process = [
+            {
+                'asin': asin,
+                'title': book.get('amazon_title', 'Unknown')
+            }
+            for asin, book in library.items()
+            if profile in book.get('profiles', [])
+            and ('pdf_available' not in book or
+                 (book.get('pdf_available', True) and not book.get('pdf_file')))
+        ]
+
+        return jsonify({
+            'success': True,
+            'books': books_to_process,
+            'message': f'Found {len(books_to_process)} books to process'
+        })
+
+    except Exception as e:
+        config.logger.error(f"Error listing missing PDFs: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/download-complete/<profile>', methods=['POST'])
@@ -737,39 +1011,126 @@ def filesize_filter(size):
 def convert_all_route(profile):
     """Convert all eligible books for a profile"""
     try:
+        from utils.converter import convert_book, conversion_status
+
         library = load_library()
         to_convert = [
-            asin for asin, book in library.items()
+            {
+                'asin': asin,
+                'title': book.get('amazon_title', 'Unknown')
+            }
+            for asin, book in library.items()
             if profile in book.get('profiles', []) 
             and book.get('audible_file') 
             and not book.get('m4b_file')
         ]
 
-        results = {
+        if not to_convert:
+            return jsonify({
+                'success': True,
+                'message': 'No books to convert'
+            })
+
+        # Return initial response to start the process
+        return jsonify({
             'success': True,
             'total': len(to_convert),
-            'converted': 0,
-            'failed': 0,
-            'failures': []
-        }
-
-        for asin in to_convert:
-            result = convert_book(asin)
-            if result['success']:
-                results['converted'] += 1
-            else:
-                results['failed'] += 1
-                book = library.get(asin, {})
-                results['failures'].append({
-                    'asin': asin,
-                    'title': book.get('amazon_title', 'Unknown'),
-                    'error': result.get('error', 'Unknown error')
-                })
-
-        return jsonify(results)
+            'asin_list': [book['asin'] for book in to_convert],
+            'message': f'Starting conversion of {len(to_convert)} books'
+        })
 
     except Exception as e:
         config.logger.error(f"Batch conversion failed: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/convert-book-batch', methods=['POST'])
+def convert_book_batch():
+    """Process a batch of book conversions one by one with status updates"""
+    try:
+        from utils.converter import convert_book, conversion_status
+        
+        data = request.get_json()
+        asin_list = data.get('asin_list', [])
+        current_index = data.get('current_index', 0)
+        results = data.get('results', {
+            'total': len(asin_list),
+            'converted': 0,
+            'failed': 0,
+            'failures': [],
+            'books': []
+        })
+        
+        # If all books processed, return final results
+        if current_index >= len(asin_list):
+            return jsonify({
+                'success': True,
+                'complete': True,
+                'results': results
+            })
+            
+        # Process the current book
+        asin = asin_list[current_index]
+        
+        # Get the book title for better logging
+        library = load_library()
+        book_title = library.get(asin, {}).get('amazon_title', 'Unknown')
+        
+        config.logger.info(f"Batch conversion {current_index+1}/{len(asin_list)}: {book_title} ({asin})")
+        
+        # Use the existing convert_book function
+        result = convert_book(asin)
+        
+        book_info = {
+            'asin': asin,
+            'title': book_title,
+            'index': current_index
+        }
+        
+        # Reload library to get updated file sizes
+        updated_library = load_library()
+        
+        if result['success']:
+            results['converted'] += 1
+            book_info['status'] = 'converted'
+            book_info['file'] = result.get('file', '')
+            
+            # Get updated file size from library
+            if asin in updated_library and updated_library[asin].get('m4b_size'):
+                book_info['size'] = updated_library[asin]['m4b_size']
+            else:
+                # If size not in library, try to get it from the file
+                if result.get('file') and os.path.exists(result['file']):
+                    book_info['size'] = os.path.getsize(result['file'])
+                else:
+                    book_info['size'] = 0
+        else:
+            results['failed'] += 1
+            book_info['status'] = 'failed'
+            book_info['error'] = result.get('error', 'Unknown error')
+            
+            results['failures'].append({
+                'asin': asin,
+                'title': book_title,
+                'error': result.get('error', 'Unknown error')
+            })
+            
+        results['books'].append(book_info)
+        
+        # Return progress update
+        return jsonify({
+            'success': True,
+            'complete': False,
+            'current_index': current_index + 1,
+            'asin_list': asin_list,
+            'current_book': book_info,
+            'results': results
+        })
+        
+    except Exception as e:
+        config.logger.error(f"Book conversion batch processing failed: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
