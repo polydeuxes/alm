@@ -226,20 +226,41 @@ def download_content(profile: str, asin: str, download_type: DownloadType, optio
                 'asin': asin
             }
         
-        # Check for multi-part books - fixed variable reference
+        # Check for multi-part books - improved detection algorithm
         if download_type == DownloadType.BOOK and (multi_part_download or (downloaded_file and "_Part_" in str(downloaded_file))):
-            # Look for all parts of this book - using a simpler pattern
-            safe_title = book_title.replace(' ', '_')
-            
-            # List all files in the directory and filter for the pattern we want
+            # Look for all parts of this book using improved pattern matching
             aax_dir = Path(download_cfg.output_dir)
             part_files = []
+            part_pattern = re.compile(r'(.+)_Part_(\d+)(?:_[^-]*)?-')
             
-            # Find files matching the pattern manually
             for file_path in aax_dir.iterdir():
-                if safe_title in file_path.name and "_Part_" in file_path.name and file_path.suffix in ('.aax', '.aaxc'):
-                    part_files.append(file_path)
-            
+                # Only consider files with the right extension that include "_Part_"
+                if "_Part_" in file_path.name and file_path.suffix in ('.aax', '.aaxc'):
+                    # Extract the base name and part number
+                    match = part_pattern.search(file_path.name)
+                    if match:
+                        base_name = match.group(1)
+                        part_number = int(match.group(2))
+                        
+                        # Create a normalized version of the book title and base name for comparison
+                        # Remove special characters and convert to lowercase
+                        normalized_title = re.sub(r'[^\w\s]', '', book_title.lower().replace(' ', '_'))
+                        normalized_base = re.sub(r'[^\w\s]', '', base_name.lower())
+                        
+                        # Check if the normalized base name ends with the normalized title
+                        # or if the title is contained within the base name (for redundant titles)
+                        if (normalized_base.endswith(normalized_title) or 
+                            normalized_title.endswith(normalized_base) or
+                            normalized_title in normalized_base):
+                            part_files.append(file_path)
+                        # For titles with unusual formatting, check for substantial word overlap
+                        elif len(normalized_title) > 30:  # Only for longer titles that might have formatting issues
+                            title_words = set(word for word in normalized_title.split('_') if len(word) > 3)
+                            base_words = set(word for word in normalized_base.split('_') if len(word) > 3)
+                            # Require a significant overlap for longer titles
+                            if len(title_words.intersection(base_words)) >= min(3, len(title_words) // 2):
+                                part_files.append(file_path)
+                                
             # Sort the files
             part_files.sort(key=lambda x: x.name)
             

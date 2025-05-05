@@ -39,8 +39,14 @@ def convert_book(asin):
         is_multi_part = book.get('is_multi_part', False)
         has_parts = 'parts' in book and len(book['parts']) > 1
 
+        # Create the output filename, removing Part_X from multi-part books
+        output_stem = Path(book['audible_file']).stem
+        if is_multi_part and "_Part_" in output_stem:
+            # Remove the Part_X suffix from the filename
+            output_stem = output_stem.split("_Part_")[0]
+        output_file = Path(config.M4B_DIR) / f"{output_stem}.m4b"
+
         # Check if output file already exists
-        output_file = Path(config.M4B_DIR) / f"{Path(book['audible_file']).stem}.m4b"
         if output_file.exists():
             # Verify file size
             source_size = Path(book['audible_file']).stat().st_size
@@ -95,7 +101,7 @@ def convert_book(asin):
                 import os
                 
                 # Create temporary directory for intermediate files
-                temp_dir = os.path.dirname(book['audible_file'])
+                temp_dir = config.TMP_DIR
                 temp_files = []
                 
                 config.logger.info(f"Processing {len(book['parts'])} parts for multi-part book '{book_title}'")
@@ -211,7 +217,7 @@ def convert_book(asin):
                 import os
                 
                 # Create temporary directory for intermediate files
-                temp_dir = os.path.dirname(book['audible_file'])
+                temp_dir = config.TMP_DIR
                 temp_files = []
                 
                 config.logger.info(f"Processing {len(book['parts'])} parts for multi-part book '{book_title}'")
@@ -263,7 +269,7 @@ def convert_book(asin):
                         '-i', cover_path,
                         '-map', '0:a',
                         '-map', '1:v',
-                        '-c:a', 'copy',  # Preserve audio codec
+                        '-c:a', 'copy',
                         '-c:v', 'copy',
                         '-id3v2_version', '3',
                         '-metadata:s:v', 'title="Album cover"',
@@ -277,7 +283,7 @@ def convert_book(asin):
                         '-f', 'concat',
                         '-safe', '0',
                         '-i', concat_file,
-                        '-c:a', 'copy',  # Preserve audio codec
+                        '-c:a', 'copy',
                         str(output_file)
                     ]
                 
