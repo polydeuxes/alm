@@ -102,9 +102,12 @@ def download_content(profile: str, asin: str, download_type: DownloadType, optio
         # Flag to indicate if download has started
         download_started = False
         
+        # Flag to indicate a multi-part book
+        multi_part_download = False
+        
         # Function to process a line of output
         def process_line(line, is_stderr=False):
-            nonlocal downloaded_file, is_locked, last_progress_log, download_started
+            nonlocal downloaded_file, is_locked, last_progress_log, download_started, multi_part_download
             
             line = line.strip()
             if is_stderr:
@@ -150,6 +153,7 @@ def download_content(profile: str, asin: str, download_type: DownloadType, optio
                 elif "be downloaded in parts" in line:
                     # This indicates a larger download that will be processed in chunks
                     download_started = True
+                    multi_part_download = True
                     config.logger.info(f"Large file detected, will be downloaded in parts: {asin}")
         
         # Read from stdout and stderr simultaneously using threads and queues
@@ -221,6 +225,64 @@ def download_content(profile: str, asin: str, download_type: DownloadType, optio
                 'status': 'locked',
                 'asin': asin
             }
+        
+        # Check for multi-part books - fixed variable reference
+        if download_type == DownloadType.BOOK and (multi_part_download or (downloaded_file and "_Part_" in str(downloaded_file))):
+            # Look for all parts of this book - using a simpler pattern
+            safe_title = book_title.replace(' ', '_')
+            
+            # List all files in the directory and filter for the pattern we want
+            aax_dir = Path(download_cfg.output_dir)
+            part_files = []
+            
+            # Find files matching the pattern manually
+            for file_path in aax_dir.iterdir():
+                if safe_title in file_path.name and "_Part_" in file_path.name and file_path.suffix in ('.aax', '.aaxc'):
+                    part_files.append(file_path)
+            
+            # Sort the files
+            part_files.sort(key=lambda x: x.name)
+            
+            if len(part_files) > 1:
+                config.logger.info(f"Found {len(part_files)} parts for book '{book_title}'")
+                
+                # Initialize parts array
+                library[asin]['parts'] = []
+                total_size = 0
+                
+                # Process each part file
+                for part_file in part_files:
+                    part_size = part_file.stat().st_size
+                    total_size += part_size
+                    
+                    part_info = {
+                        'file_path': str(part_file),
+                        'file_size': part_size,
+                        'format': part_file.suffix[1:]  # Remove the leading dot
+                    }
+                    
+                    library[asin]['parts'].append(part_info)
+                
+                # Mark as multi-part in the library
+                library[asin]['is_multi_part'] = True
+                library[asin]['parts_count'] = len(part_files)
+                
+                # Set the first part as the main file for backward compatibility
+                # but use the total size of all parts
+                library[asin]['audible_file'] = str(part_files[0])
+                library[asin]['audible_size'] = total_size
+                library[asin]['audible_format'] = part_files[0].suffix[1:]
+                
+                # Save the updated library
+                save_library(library)
+                
+                return {
+                    'success': True,
+                    'is_multi_part': True,
+                    'parts_count': len(part_files),
+                    'total_size': total_size,
+                    'file': str(part_files[0])  # Return the first part for compatibility
+                }
         
         # Process the file if we found one
         if downloaded_file:
